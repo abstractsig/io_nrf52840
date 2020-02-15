@@ -1,6 +1,6 @@
 /*
  *
- * io representation of a nrf52840 cpu
+ * io nrf52840 cpu
  *
  */
 #ifndef io_cpu_H_
@@ -177,6 +177,23 @@ typedef struct PACK_STRUCTURE nrf52_uart {
 
 extern EVENT_DATA io_socket_implementation_t nrf52_uart_implementation;
 
+typedef struct PACK_STRUCTURE nrf52_spi {
+	IO_SOCKET_STRUCT_MEMBERS
+
+	io_encoding_implementation_t const *encoding;
+	io_t *io;
+
+	NRF_SPI_Type *spi_registers;
+	nrf_io_pin_t tx_pin;
+	nrf_io_pin_t rx_pin;
+	nrf_io_pin_t rts_pin;
+	nrf_io_pin_t cts_pin;
+	uint32_t maximum_speed;
+
+} nrf52_spi_t;
+
+extern EVENT_DATA io_socket_implementation_t nrf52_spi_implementation;
+
 #ifdef IMPLEMENT_IO_CPU
 //-----------------------------------------------------------------------------
 //
@@ -274,7 +291,7 @@ static void	nrf52_uart_tx_complete (io_event_t*);
 
 #define NRF52_UART_RX_DMA_BUFFER_LENGTH 1
 
-static void
+static io_socket_t*
 nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 	this->io = io;
@@ -306,6 +323,8 @@ nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t cons
 	register_io_interrupt_handler (
 		io,this->interrupt_number,nrf52_uart_interrupt,this
 	);
+	
+	return socket;
 }
 
 static void
@@ -391,7 +410,7 @@ nrf52_uart_get_io (io_socket_t *socket) {
 	return this->io;
 }
 
-io_event_t*
+static io_event_t*
 nrf52_uart_bindr (io_socket_t *socket,io_event_t *rx) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 	if (io_event_is_active (io_pipe_event(this->rx_pipe))) {
@@ -550,7 +569,7 @@ nrf52_uart_mtu (io_socket_t const *socket) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
-	.specialisation_of = NULL,
+	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_uart_initialise,
 	.free = NULL,
 	.get_io = nrf52_uart_get_io,
@@ -563,6 +582,67 @@ EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	.iterate_inner_sockets = NULL,
 	.iterate_outer_sockets = NULL,
 	.mtu = nrf52_uart_mtu,
+};
+
+static io_socket_t*
+nrf52_spi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
+	nrf52_spi_t *this = (nrf52_spi_t*) socket;
+	this->io = io;	
+	return socket;
+}
+
+static io_t*
+nrf52_spi_get_io (io_socket_t *socket) {
+	nrf52_spi_t *this = (nrf52_spi_t*) socket;
+	return this->io;
+}
+
+static size_t
+nrf52_spi_mtu (io_socket_t const *socket) {
+	return 1024;
+}
+static bool
+nrf52_spi_open (io_socket_t *socket) {
+	return false;
+}
+static void
+nrf52_spi_close (io_socket_t *socket) {
+}
+
+static io_event_t*
+nrf52_spi_bindr (io_socket_t *socket,io_event_t *rx) {
+	return NULL;
+}
+
+static io_pipe_t*
+nrf52_spi_bindt (io_socket_t *socket,io_event_t *ev) {
+	return NULL;
+}
+
+static io_encoding_t*
+nrf52_spi_new_message (io_socket_t *socket) {
+	return NULL;
+}
+
+static bool
+nrf52_spi_send_message (io_socket_t *socket,io_encoding_t *encoding) {
+	return false;
+}
+
+EVENT_DATA io_socket_implementation_t nrf52_spi_implementation = {
+	.specialisation_of = &io_physical_socket_implementation_base,
+	.initialise = nrf52_spi_initialise,
+	.free = io_socket_free_panic,
+	.get_io = nrf52_spi_get_io,
+	.open = nrf52_spi_open,
+	.close = nrf52_spi_close,
+	.bindr = nrf52_spi_bindr,
+	.bindt = nrf52_spi_bindt,
+	.new_message = nrf52_spi_new_message,
+	.send_message = nrf52_spi_send_message,
+	.iterate_inner_sockets = NULL,
+	.iterate_outer_sockets = NULL,
+	.mtu = nrf52_spi_mtu,
 };
 
 //
