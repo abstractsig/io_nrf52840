@@ -1275,9 +1275,6 @@ static bool errata_136(void)
 }
 #endif /* IMPLEMENT_IO_CPU */
 #ifdef IMPLEMENT_VERIFY_IO_CPU
-
-#endif /* IMPLEMENT_VERIFY_IO_CPU */
-#ifdef IMPLEMENT_VERIFY_IO_CORE
 UNIT_SETUP(setup_io_cpu_unit_test) {
 	return VERIFY_UNIT_CONTINUE;
 }
@@ -1298,7 +1295,12 @@ io_cpu_unit_test (V_unit_test_t *unit) {
 	unit->setup = setup_io_cpu_unit_test;
 	unit->teardown = teardown_io_cpu_unit_test;
 }
-#endif /* IMPLEMENT_VERIFY_IO_CORE */
+#define IO_CPU_UNIT_TESTS \
+	io_cpu_unit_test,\
+	/**/
+#else
+#define IO_CPU_UNIT_TESTS
+#endif /* IMPLEMENT_VERIFY_IO_CPU */
 #endif /* io_cpu_H_ */
 /*
 ------------------------------------------------------------------------------
