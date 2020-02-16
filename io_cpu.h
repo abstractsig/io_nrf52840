@@ -9,11 +9,27 @@
 #include <nrf52840.h>
 #include <nrf52840_bitfields.h>
 
+typedef struct PACK_STRUCTURE nrf_time_clock {
+
+	NRF_TIMER_Type *high_timer;
+	NRF_TIMER_Type *low_timer;	
+	IRQn_Type interrupt_number;
+	uint32_t ppi_channel;
+
+	io_event_t alarm;
+	io_t *io;
+	
+} nrf_64bit_time_clock_t;
+
+void	start_nrf_time_clock (io_t*,nrf_64bit_time_clock_t*);
+
 #define NRF52840_IO_CPU_STRUCT_MEMBERS \
 	IO_STRUCT_MEMBERS				\
 	io_value_memory_t *vm;\
 	io_byte_memory_t *bm;\
 	uint32_t in_event_thread;\
+	io_value_pipe_t *tasks;\
+	nrf_64bit_time_clock_t tc;\
 	/**/
 
 typedef struct PACK_STRUCTURE nrf52840_io {
@@ -208,7 +224,7 @@ extern EVENT_DATA io_socket_implementation_t nrf52_spi_implementation;
 #include <nrf52_sdk.h>
 
 //
-// Clock
+// cpu clocks
 //
 
 static float64_t
@@ -282,6 +298,203 @@ EVENT_DATA io_cpu_clock_implementation_t nrf52_core_clock_implementation = {
 	.start = nrf52_core_clock_start,
 	.stop = NULL,
 };
+
+//
+// 64bit time clock
+//
+#define TIME_CLOCK_NS_PER_TICK		125LL
+
+static void
+nrf52_time_clock_interrupt (void *user_value) {
+	nrf_64bit_time_clock_t *this = user_value;
+	this->low_timer->EVENTS_COMPARE[0] = 0;
+	io_enqueue_event (this->io,&this->alarm);
+}
+
+static uint64_t
+read_64bit_count (nrf_64bit_time_clock_t *this) {
+	io_time_t time = {0};
+
+	do {
+		this->low_timer->TASKS_CAPTURE[1] = 1;
+		this->high_timer->TASKS_CAPTURE[1] = 1;
+		
+		time.part.low = this->low_timer->CC[1];
+		time.part.high = this->high_timer->CC[1];
+		this->high_timer->TASKS_CAPTURE[1] = 1;
+	} while (time.part.high != this->high_timer->CC[1]);
+	
+	return time.u64;
+}
+
+static bool
+set_64bit_time_clock_alarm_time (nrf_64bit_time_clock_t *this) {
+	if (this->io->alarms != &s_null_io_alarm) {
+		int64_t next_alarm_count = (
+			this->io->alarms->when.nanoseconds / TIME_CLOCK_NS_PER_TICK
+		);
+		int64_t current_count = read_64bit_count (this) + 10000;
+
+		if (next_alarm_count > current_count) {
+			this->low_timer->CC[0] = next_alarm_count;
+			return true;
+		} else {
+			// alarm is not in future
+			return false;
+		}
+	} else {
+		return false;
+	}
+}
+
+static io_time_t
+nrf_64bit_time_clock_get_time (nrf_64bit_time_clock_t *this) {
+	return (io_time_t) {
+		.nanoseconds = read_64bit_count(this) * TIME_CLOCK_NS_PER_TICK,
+	};
+}
+
+static bool
+process_next_alarm (nrf_64bit_time_clock_t *this) {
+	if (this->io->alarms != &s_null_io_alarm) {
+		volatile io_time_t t = nrf_64bit_time_clock_get_time (this);
+		
+		if (t.nanoseconds >= this->io->alarms->when.nanoseconds) {
+			io_alarm_t *alarm = this->io->alarms;
+			this->io->alarms = this->io->alarms->next_alarm;
+			alarm->next_alarm = NULL;
+			alarm->at->event_handler (alarm->at);
+			
+			//
+			// tollerance check ...
+			//
+			return true;
+		} else {
+			//while(1) {}
+		}
+	}
+	return false;
+}
+
+static void
+process_alarm_queue (io_event_t *ev) {
+	nrf_64bit_time_clock_t *this = ev->user_value;
+	uint32_t count = 0;
+	
+	while (process_next_alarm(this)) {
+		count++;
+	}
+	
+	if (count) {
+		set_64bit_time_clock_alarm_time (this);
+	}
+}
+
+void
+start_nrf_time_clock (io_t *io,nrf_64bit_time_clock_t *this) {
+
+	this->io = io;
+	initialise_io_event (&this->alarm,process_alarm_queue,this);
+
+	register_io_interrupt_handler (
+		this->io,this->interrupt_number,nrf52_time_clock_interrupt,this
+	);
+
+	this->high_timer->TASKS_STOP = 1;
+	this->low_timer->TASKS_STOP = 1;
+
+	this->high_timer->TASKS_CLEAR = 1;
+	this->low_timer->TASKS_CLEAR = 1;
+
+	this->high_timer->MODE = TIMER_MODE_MODE_Counter;
+	this->high_timer->BITMODE = (
+		TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos
+	);
+
+	this->low_timer->MODE = TIMER_MODE_MODE_Timer;
+	this->low_timer->BITMODE = (
+		TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos
+	);
+	this->low_timer->PRESCALER = 1;  // 125ns resolution
+
+	// get high timer to count low timer roll-overs
+	this->low_timer->CC[5] = 0xffffffff; // reduce count to test
+	this->low_timer->SHORTS = (
+		TIMER_SHORTS_COMPARE5_CLEAR_Enabled << TIMER_SHORTS_COMPARE5_CLEAR_Pos
+	);
+
+	NRF_PPI->CH[this->ppi_channel].EEP = (
+		(uint32_t) &this->low_timer->EVENTS_COMPARE[5]
+	);
+
+	NRF_PPI->CH[this->ppi_channel].TEP = (
+		(uint32_t) &this->high_timer->TASKS_COUNT
+	);
+	NRF_PPI->CHENSET = (1 << this->ppi_channel);
+
+	this->low_timer->CC[0] = 0;	// a starter for 10
+
+	this->low_timer->INTENSET = (
+		TIMER_INTENSET_COMPARE0_Enabled << TIMER_INTENSET_COMPARE0_Pos
+	);
+
+	NVIC_SetPriority (this->interrupt_number,NORMAL_INTERRUPT_PRIORITY);
+	NVIC_ClearPendingIRQ (this->interrupt_number);
+	NVIC_EnableIRQ (this->interrupt_number);
+	
+	this->high_timer->TASKS_START = 1;
+	this->low_timer->TASKS_START = 1;
+}
+
+static void
+nrf_time_clock_enqueue_alarm (io_t *io,io_alarm_t *alarm) {
+	nrf_64bit_time_clock_t *this = &((nrf52840_io_t*) io)->tc;
+	
+	ENTER_CRITICAL_SECTION(io);
+
+	if (alarm->when.nanoseconds < this->io->alarms->when.nanoseconds) {
+		alarm->next_alarm = this->io->alarms;
+		this->io->alarms = alarm;
+		if (!set_64bit_time_clock_alarm_time (this)) {
+			io_panic (io,0);
+		}
+	} else {
+		io_alarm_t *pre = this->io->alarms;
+		while (alarm->when.nanoseconds > pre->when.nanoseconds) {
+			if (pre->next_alarm == &s_null_io_alarm) {
+				break;
+			}
+			pre = pre->next_alarm;
+		}
+		alarm->next_alarm = pre->next_alarm;
+		pre->next_alarm = alarm;
+	}
+
+	EXIT_CRITICAL_SECTION(io);
+}
+
+static void
+nrf_time_clock_dequeue_alarm (io_t *io,io_alarm_t *alarm) {
+	if (alarm->next_alarm != NULL) {
+		ENTER_CRITICAL_SECTION (io);
+		if (alarm == io->alarms) {
+			nrf_64bit_time_clock_t *this = &((nrf52840_io_t*) io)->tc;
+			io->alarms = io->alarms->next_alarm;
+			set_64bit_time_clock_alarm_time (this);
+		} else {
+			io_alarm_t *pre = io->alarms;
+			while (pre) {
+				if (alarm == pre->next_alarm) {
+					pre->next_alarm = alarm->next_alarm;
+					break;
+				}
+				pre = pre->next_alarm;
+			}
+		}
+		alarm->next_alarm = NULL;
+		EXIT_CRITICAL_SECTION (io);
+	}
+}
 
 //
 // Sockets
@@ -862,6 +1075,40 @@ nrf52_signal_task_pending (io_t *io) {
 	// no action required
 }
 
+static bool
+nrf52_enqueue_task (io_t *io,vref_t r_task) {
+	nrf52840_io_t *this = (nrf52840_io_t*) io;
+	return io_value_pipe_put_value (this->tasks,r_task);
+}
+
+static bool
+nrf52_do_next_task (io_t *io) {
+	nrf52840_io_t *this = (nrf52840_io_t*) io;
+	vref_t r_task;
+	if (io_value_pipe_get_value (this->tasks,&r_task)) {
+		vref_t const *argv;
+		uint32_t argc;
+		
+		if (io_vector_value_get_values (r_task,&argc,&argv)) {
+			
+			// ...
+		
+			return true;
+		}
+	}
+	return false;
+}
+
+static io_time_t
+nrf52_get_time (io_t *io) {
+	nrf52840_io_t *this = (nrf52840_io_t*) io;
+	return nrf_64bit_time_clock_get_time (&this->tc);
+//	io_time_t t = {
+//		.nanoseconds = read_64bit_count(&this->tc) * TIME_CLOCK_NS_PER_TICK
+//	};
+//	return t;
+}
+
 void
 add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	add_io_implementation_core_methods (io_i);
@@ -871,11 +1118,16 @@ add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	io_i->do_gc = nrf52_do_gc;
 	io_i->get_random_u32 = nrf52_get_random_u32;
 	io_i->signal_task_pending = nrf52_signal_task_pending;
+	io_i->enqueue_task = nrf52_enqueue_task;
+	io_i->do_next_task = nrf52_do_next_task;
 	io_i->signal_event_pending = nrf52_signal_event_pending;
 	io_i->enter_critical_section = nrf52_enter_critical_section;
 	io_i->exit_critical_section = nrf52_exit_critical_section;
 	io_i->in_event_thread = nrf52_is_in_event_thread;
 	io_i->wait_for_event = nrf52_wait_for_event;
+	io_i->get_time = nrf52_get_time,
+	io_i->enqueue_alarm = nrf_time_clock_enqueue_alarm;
+	io_i->dequeue_alarm = nrf_time_clock_dequeue_alarm;
 	io_i->register_interrupt_handler = nrf52_register_interrupt_handler;
 	io_i->unregister_interrupt_handler = nrf52_unregister_interrupt_handler;
 	io_i->wait_for_all_events = wait_for_all_events;
@@ -895,17 +1147,22 @@ add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 
 static void
 event_thread (void *io) {
+	nrf52840_io_t *this = io;
+	this->in_event_thread = true;
 	while (next_io_event (io));
+	this->in_event_thread = false;
 }
 
 void
 initialise_cpu_io (io_t *io) {
-	((nrf52840_io_t*) io)->in_event_thread = false;
-	
+	nrf52840_io_t *this = (nrf52840_io_t*) io;
+	this->in_event_thread = false;
 	register_io_interrupt_handler (
 		io,EVENT_THREAD_INTERRUPT,event_thread,io
 	);
 	NVIC_EnableIRQ (EVENT_THREAD_INTERRUPT);
+	
+	start_nrf_time_clock (io,&this->tc);
 }
 
 static void apply_nrf_cpu_errata (void);
@@ -1281,6 +1538,68 @@ static bool errata_136(void)
 }
 #endif /* IMPLEMENT_IO_CPU */
 #ifdef IMPLEMENT_VERIFY_IO_CPU
+
+static void
+test_io_events_1_ev (io_event_t *ev) {
+	*((uint32_t*) ev->user_value) = 1;
+}
+
+TEST_BEGIN(test_io_events_1) {
+	volatile uint32_t a = 0;
+	io_event_t ev;
+		
+	initialise_io_event (&ev,test_io_events_1_ev,(void*) &a);
+
+	io_enqueue_event (TEST_IO,&ev);
+	while (a == 0);
+	VERIFY (a == 1,NULL);
+}
+TEST_END
+
+static uint32_t test_io_events_2_ev_result = 0;
+
+static void
+test_io_events_2_ev (io_event_t *ev) {
+	test_io_events_2_ev_result = io_is_in_event_thread (ev->user_value);
+}
+
+TEST_BEGIN(test_io_events_2) {
+	io_event_t ev;
+		
+	initialise_io_event (&ev,test_io_events_2_ev,TEST_IO);
+
+	test_io_events_2_ev_result = 0;
+	
+	io_enqueue_event (TEST_IO,&ev);
+	io_wait_for_all_events (TEST_IO);
+	
+	VERIFY (test_io_events_2_ev_result == 1,NULL);
+}
+TEST_END
+
+TEST_BEGIN(test_time_clock_alarms_1) {
+	volatile uint32_t a = 0;
+	io_alarm_t alarm;
+	io_event_t ev;
+	io_time_t t;
+	initialise_io_event (&ev,test_io_events_1_ev,(void*) &a);
+	
+	t = io_get_time (TEST_IO);
+	initialise_io_alarm (
+		&alarm,&ev,&ev,
+		(io_time_t) {t.nanoseconds + millisecond_time(200).nanoseconds}
+	);
+
+	io_enqueue_alarm (TEST_IO,&alarm);
+
+	//io_printf (TEST_IO,"from %lld to %lld\n",t.nanoseconds,alarm.when.nanoseconds);
+	
+	while (a == 0);
+	VERIFY (a == 1,NULL);	
+}
+TEST_END
+
+
 UNIT_SETUP(setup_io_cpu_unit_test) {
 	return VERIFY_UNIT_CONTINUE;
 }
@@ -1291,8 +1610,9 @@ UNIT_TEARDOWN(teardown_io_cpu_unit_test) {
 void
 io_cpu_unit_test (V_unit_test_t *unit) {
 	static V_test_t const tests[] = {
-		#ifdef IMPLEMENT_VERIFY_IO_CPU
-		#endif
+		test_io_events_1,
+		test_io_events_2,
+		test_time_clock_alarms_1,
 		0
 	};
 	unit->name = "io cpu";
