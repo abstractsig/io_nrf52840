@@ -857,6 +857,11 @@ nrf52_io_pin_is_valid (io_t *io,io_pin_t p) {
 	return nrf_io_pin_is_valid (pin);
 }
 
+static void
+nrf52_signal_task_pending (io_t *io) {
+	// no action required
+}
+
 void
 add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	add_io_implementation_core_methods (io_i);
@@ -865,6 +870,7 @@ add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	io_i->get_short_term_value_memory = nrf52_io_get_stvm;
 	io_i->do_gc = nrf52_do_gc;
 	io_i->get_random_u32 = nrf52_get_random_u32;
+	io_i->signal_task_pending = nrf52_signal_task_pending;
 	io_i->signal_event_pending = nrf52_signal_event_pending;
 	io_i->enter_critical_section = nrf52_enter_critical_section;
 	io_i->exit_critical_section = nrf52_exit_critical_section;
