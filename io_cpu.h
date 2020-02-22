@@ -36,8 +36,7 @@ typedef struct PACK_STRUCTURE nrf52840_io {
 	NRF52840_IO_CPU_STRUCT_MEMBERS
 } nrf52840_io_t;
 
-void initialise_cpu_io (io_t*);
-
+void	initialise_cpu_io (io_t*);
 
 #define NUMBER_OF_ARM_INTERRUPT_VECTORS	16L
 #define NUMBER_OF_NRF_INTERRUPT_VECTORS	47L
@@ -93,7 +92,6 @@ extern EVENT_DATA io_cpu_clock_implementation_t nrf52_core_clock_implementation;
 #define GPIO_PIN_INACTIVE					0
 #define GPIO_PIN_ACTIVE						1
 
-
 typedef union PACK_STRUCTURE {
 	io_pin_t io;
 	uint32_t u32;
@@ -134,6 +132,16 @@ typedef union PACK_STRUCTURE {
 		.nrf.event_sense = GPIOTE_CONFIG_POLARITY_None,\
 	}
 	
+#define def_nrf_io_pin_alternate_high_drive(port,pin_number) (nrf_io_pin_t) {\
+		.nrf.pin_map = NRF_GPIO_PIN_MAP(port,pin_number),\
+		.nrf.active_level = 0,\
+		.nrf.drive_level = 3,\
+		.nrf.initial_state = GPIO_PIN_INACTIVE,\
+		.nrf.pull_mode = NRF_GPIO_PIN_NOPULL,\
+		.nrf.gpiote_channel = 0,\
+		.nrf.event_sense = GPIOTE_CONFIG_POLARITY_None,\
+	}
+
 #define def_nrf_io_input_pin(port,pin_number,active,pull) (nrf_io_pin_t) {\
 		.nrf.pin_map = NRF_GPIO_PIN_MAP(port,pin_number),\
 		.nrf.active_level = active,\
@@ -160,7 +168,10 @@ typedef union PACK_STRUCTURE {
 		.nrf.gpiote_channel = channel,\
 		.nrf.event_sense = sense,\
 	}
-	
+
+void	nrf52_configure_reset_pin (nrf_io_pin_t);
+void	nrf_gpio_pin_set_drive_level (nrf_io_pin_t);
+
 //
 // sockets
 //
@@ -200,10 +211,10 @@ typedef struct PACK_STRUCTURE nrf52_spi {
 	io_t *io;
 
 	NRF_SPI_Type *spi_registers;
-	nrf_io_pin_t tx_pin;
-	nrf_io_pin_t rx_pin;
-	nrf_io_pin_t rts_pin;
-	nrf_io_pin_t cts_pin;
+	nrf_io_pin_t mosi_pin;
+	nrf_io_pin_t miso_pin;
+	nrf_io_pin_t sclk_pin;
+	nrf_io_pin_t cs_pin;
 	uint32_t maximum_speed;
 
 } nrf52_spi_t;
@@ -493,6 +504,51 @@ nrf_time_clock_dequeue_alarm (io_t *io,io_alarm_t *alarm) {
 		}
 		alarm->next_alarm = NULL;
 		EXIT_CRITICAL_SECTION (io);
+	}
+}
+
+//
+// needed for boards that use the 5V power setup
+//
+void
+nrf_io_pin_voltage_setup (void) {
+	if (
+			(NRF_UICR->REGOUT0 & UICR_REGOUT0_VOUT_Msk)
+		==	(UICR_REGOUT0_VOUT_DEFAULT << UICR_REGOUT0_VOUT_Pos)
+	) {
+		NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Wen;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
+
+		NRF_UICR->REGOUT0 = (
+				(NRF_UICR->REGOUT0 & ~((uint32_t)UICR_REGOUT0_VOUT_Msk))
+			|	(UICR_REGOUT0_VOUT_3V0 << UICR_REGOUT0_VOUT_Pos)
+		);
+
+		NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Ren;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
+
+		// System reset is needed to update UICR registers.
+		NVIC_SystemReset();
+	}
+}
+
+void
+nrf52_configure_reset_pin (nrf_io_pin_t reset_pin) {
+	if ((NRF_UICR->PSELRESET[0] & 0x3f) == 0x3f) {
+		NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Wen;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
+
+		NRF_UICR->PSELRESET[0] = (
+				(UICR_PSELRESET_CONNECT_Connected << UICR_PSELRESET_CONNECT_Pos)
+			|	nrf_gpio_pin_map (reset_pin)
+		);
+		NRF_UICR->PSELRESET[1] = (
+				(UICR_PSELRESET_CONNECT_Connected << UICR_PSELRESET_CONNECT_Pos)
+			|	nrf_gpio_pin_map (reset_pin)
+		);
+		
+		NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Ren;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
 	}
 }
 
@@ -797,10 +853,45 @@ EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	.mtu = nrf52_uart_mtu,
 };
 
+#define SPI_PSEL_SCK_MSK (SPI_PSEL_SCK_CONNECT_Msk | SPI_PSEL_SCK_PORT_Msk | SPI_PSEL_SCK_PIN_Msk)
+#define SPI_PSEL_MOSI_MSK (SPI_PSEL_MOSI_CONNECT_Msk | SPI_PSEL_MOSI_PORT_Msk | SPI_PSEL_MOSI_PIN_Msk)
+#define SPI_PSEL_MISO_MSK (SPI_PSEL_MISO_CONNECT_Msk | SPI_PSEL_MISO_PORT_Msk | SPI_PSEL_MISO_PIN_Msk)
+
 static io_socket_t*
 nrf52_spi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
 	nrf52_spi_t *this = (nrf52_spi_t*) socket;
-	this->io = io;	
+	this->io = io;
+	
+	this->spi_registers->ENABLE &= ~SPI_ENABLE_ENABLE_Msk;
+	
+	io_set_pin_to_output (this->io,this->cs_pin.io);
+	
+	this->spi_registers->PSEL.MISO &= ~SPI_PSEL_MISO_MSK;
+	this->spi_registers->PSEL.MISO |= (
+			(SPI_PSEL_MISO_CONNECT_Connected << SPI_PSEL_MISO_CONNECT_Pos)
+		|	nrf_gpio_pin_map(this->miso_pin)
+	);
+	
+	this->spi_registers->PSEL.MOSI &= ~SPI_PSEL_MOSI_MSK;
+	this->spi_registers->PSEL.MOSI |= (
+			(SPI_PSEL_MOSI_CONNECT_Connected << SPI_PSEL_MOSI_CONNECT_Pos)
+		|	nrf_gpio_pin_map(this->mosi_pin)
+	);
+	
+	this->spi_registers->PSEL.SCK &= ~SPI_PSEL_SCK_MSK;
+	this->spi_registers->PSEL.SCK |= (
+			(SPI_PSEL_SCK_CONNECT_Connected << SPI_PSEL_SCK_CONNECT_Pos)
+		|	nrf_gpio_pin_map(this->sclk_pin)
+	);
+	
+	this->spi_registers->FREQUENCY = SPI_FREQUENCY_FREQUENCY_M8;
+	
+	this->spi_registers->CONFIG = (
+			(SPI_CONFIG_CPOL_ActiveLow << SPI_CONFIG_CPOL_Pos)
+		|	(SPI_CONFIG_CPHA_Leading << SPI_CONFIG_CPHA_Pos)
+		|	(SPI_CONFIG_ORDER_MsbFirst << SPI_CONFIG_ORDER_Pos)
+	);
+	
 	return socket;
 }
 
@@ -816,7 +907,13 @@ nrf52_spi_mtu (io_socket_t const *socket) {
 }
 static bool
 nrf52_spi_open (io_socket_t *socket) {
-	return false;
+	nrf52_spi_t *this = (nrf52_spi_t*) socket;
+
+	if ((this->spi_registers->ENABLE & SPI_ENABLE_ENABLE_Msk) == 0) {
+		this->spi_registers->ENABLE |= (SPI_ENABLE_ENABLE_Enabled << SPI_ENABLE_ENABLE_Pos);
+	}
+	
+	return true;
 }
 static void
 nrf52_spi_close (io_socket_t *socket) {
@@ -1000,6 +1097,16 @@ nrf52_unregister_interrupt_handler (
 }
 
 static void
+nrf52_write_to_io_pin (io_t *io,io_pin_t rpin,int32_t state) {
+	nrf_io_pin_t pin = {rpin};
+	if (state ^ nrf_gpio_pin_active_level (pin)) {
+		nrf_gpio_pin_write(nrf_gpio_pin_map(pin),0);
+	} else {
+		nrf_gpio_pin_write(nrf_gpio_pin_map(pin),1);
+	}
+}
+
+static void
 nrf52_set_io_pin_to_input (io_t *io,io_pin_t rpin) {
 	nrf_io_pin_t pin = {rpin};
 	nrf_gpio_cfg_input (
@@ -1010,18 +1117,18 @@ nrf52_set_io_pin_to_input (io_t *io,io_pin_t rpin) {
 static void
 nrf52_set_io_pin_to_output (io_t *io,io_pin_t rpin) {
 	nrf_io_pin_t pin = {rpin};
-	write_to_io_pin (io,rpin,nrf_gpio_pin_initial_state(pin));
+	nrf52_write_to_io_pin (io,rpin,nrf_gpio_pin_initial_state(pin));
 	nrf_gpio_cfg_output(nrf_gpio_pin_map(pin));
 }
 
 static void
-nrf52_toggle_io_pin (io_t *env,io_pin_t rpin) {
+nrf52_toggle_io_pin (io_t *io,io_pin_t rpin) {
 	nrf_io_pin_t pin = {rpin};
 	nrf_gpio_pin_toggle(nrf_gpio_pin_map(pin));
 }
 
 static int32_t
-nrf52_read_io_input_pin (io_t *env,io_pin_t rpin) {
+nrf52_read_io_input_pin (io_t *io,io_pin_t rpin) {
 	nrf_io_pin_t pin = {rpin};
 	return (
 			nrf_gpio_pin_read (nrf_gpio_pin_map(pin))
@@ -1036,16 +1143,6 @@ nrf_gpio_pin_set_drive_level (nrf_io_pin_t pin) {
 	uint32_t cfg = reg->PIN_CNF[pin_number] & ~GPIO_PIN_CNF_DRIVE_Msk;
 	cfg |= (nrf_gpio_pin_drive_level(pin) << GPIO_PIN_CNF_DRIVE_Pos);
 	reg->PIN_CNF[pin_number] = cfg;
-}
-
-static void
-nrf52_write_to_io_pin (io_t *io,io_pin_t rpin,int32_t state) {
-	nrf_io_pin_t pin = {rpin};
-	if (state ^ nrf_gpio_pin_active_level (pin)) {
-		nrf_gpio_pin_write(nrf_gpio_pin_map(pin),0);
-	} else {
-		nrf_gpio_pin_write(nrf_gpio_pin_map(pin),1);
-	}
 }
 
 static void
@@ -1210,9 +1307,12 @@ initialise_c_runtime (void) {
 	initialise_ram_interrupt_vectors ();
 }
 
+#include <io_board.h>
+
 int main(void);
 void
 nrf52_core_reset (void) {
+
 	initialise_c_runtime ();
 	apply_nrf_cpu_errata ();
 
