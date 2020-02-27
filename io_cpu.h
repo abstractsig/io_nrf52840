@@ -244,7 +244,7 @@ nrf52_crystal_oscillator_get_frequency (io_cpu_clock_pointer_t this) {
 }
 
 static bool
-nrf52_crystal_oscillator_start (io_cpu_clock_pointer_t this) {
+nrf52_crystal_oscillator_start (io_t *io,io_cpu_clock_pointer_t this) {
 	if (NRF_CLOCK->EVENTS_HFCLKSTARTED == 0) {
 		//
 		// this also connects the clock to the CPU 
@@ -271,7 +271,7 @@ nrf52_on_chip_oscillator_get_frequency (io_cpu_clock_pointer_t this) {
 }
 
 static bool
-nrf52_on_chip_oscillator_start (io_cpu_clock_pointer_t this) {
+nrf52_on_chip_oscillator_start (io_t *io,io_cpu_clock_pointer_t this) {
 	return true;
 }
 
@@ -293,8 +293,8 @@ nrf52_core_clock_get_frequency (io_cpu_clock_pointer_t clock) {
 }
 
 static bool
-nrf52_core_clock_start (io_cpu_clock_pointer_t clock) {
-	if (io_cpu_dependant_clock_start_input (clock)) {
+nrf52_core_clock_start (io_t *io,io_cpu_clock_pointer_t clock) {
+	if (io_cpu_dependant_clock_start_input (io,clock)) {
 		return true;
 	} else {
 		return false;
@@ -613,7 +613,7 @@ nrf_uart_start_rx (nrf52_uart_t *this) {
 }
 
 static bool
-nrf52_uart_open (io_socket_t *socket) {
+nrf52_uart_open (io_t* io,io_socket_t *socket) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 
 	if (this->uart_registers->ENABLE == 0) {
@@ -906,7 +906,7 @@ nrf52_spi_mtu (io_socket_t const *socket) {
 	return 1024;
 }
 static bool
-nrf52_spi_open (io_socket_t *socket) {
+nrf52_spi_open (io_t *io,io_socket_t *socket) {
 	nrf52_spi_t *this = (nrf52_spi_t*) socket;
 
 	if ((this->spi_registers->ENABLE & SPI_ENABLE_ENABLE_Msk) == 0) {
