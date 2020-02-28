@@ -30,6 +30,7 @@ void	start_nrf_time_clock (io_t*,nrf_64bit_time_clock_t*);
 	uint32_t in_event_thread;\
 	io_value_pipe_t *tasks;\
 	nrf_64bit_time_clock_t tc;\
+	uint32_t prbs_state[4]; \
 	/**/
 
 typedef struct PACK_STRUCTURE nrf52840_io {
@@ -613,7 +614,7 @@ nrf_uart_start_rx (nrf52_uart_t *this) {
 }
 
 static bool
-nrf52_uart_open (io_t* io,io_socket_t *socket) {
+nrf52_uart_open (io_socket_t *socket) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 
 	if (this->uart_registers->ENABLE == 0) {
@@ -906,7 +907,7 @@ nrf52_spi_mtu (io_socket_t const *socket) {
 	return 1024;
 }
 static bool
-nrf52_spi_open (io_t *io,io_socket_t *socket) {
+nrf52_spi_open (io_socket_t *socket) {
 	nrf52_spi_t *this = (nrf52_spi_t*) socket;
 
 	if ((this->spi_registers->ENABLE & SPI_ENABLE_ENABLE_Msk) == 0) {
@@ -1030,6 +1031,32 @@ nrf52_get_random_u32 (io_t *io) {
 	exit_io_critical_section (io,h);
 
 	return r;
+}
+
+INLINE_FUNCTION uint32_t prbs_rotl(const uint32_t x, int k) {
+	return (x << k) | (x >> (32 - k));
+}
+
+static uint32_t
+nrf52_get_prbs_random_u32 (io_t *io) {
+	nrf52840_io_t *this = (nrf52840_io_t*) io;
+	uint32_t *s = this->prbs_state;
+	bool h = enter_io_critical_section (io);
+	const uint32_t result = prbs_rotl (s[0] + s[3], 7) + s[0];
+
+	const uint32_t t = s[1] << 9;
+
+	s[2] ^= s[0];
+	s[3] ^= s[1];
+	s[1] ^= s[2];
+	s[0] ^= s[3];
+
+	s[2] ^= t;
+
+	s[3] = prbs_rotl (s[3], 11);
+
+	exit_io_critical_section (io,h);
+	return result;
 }
 
 static void
@@ -1214,6 +1241,7 @@ add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	io_i->get_short_term_value_memory = nrf52_io_get_stvm;
 	io_i->do_gc = nrf52_do_gc;
 	io_i->get_random_u32 = nrf52_get_random_u32;
+	io_i->get_next_prbs_u32 = nrf52_get_prbs_random_u32;
 	io_i->signal_task_pending = nrf52_signal_task_pending;
 	io_i->enqueue_task = nrf52_enqueue_task;
 	io_i->do_next_task = nrf52_do_next_task;
