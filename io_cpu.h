@@ -235,6 +235,122 @@ extern EVENT_DATA io_socket_implementation_t nrf52_spi_implementation;
 #define NRF_GPIOTE_PERIPHERAL		NRF_GPIOTE
 #include <nrf52_sdk.h>
 
+#define NFR_PERSISTANT_MEMORY_SECTION __attribute__ ((section(".io_config")))
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * the initial io state settings
+ *
+ *-----------------------------------------------------------------------------
+ */
+static NFR_PERSISTANT_MEMORY_SECTION io_persistant_state_t ioc = {
+	.first_run_flag = IO_FIRST_RUN_SET,
+	.power_cycles = 0,
+	.uid = {{0}},
+	.secret = {{0}},
+	.shared = {{0}},
+};
+
+static bool
+nrf52840_io_config_is_first_run (io_t *io) {
+	return ioc.first_run_flag == IO_FIRST_RUN_SET;
+}
+
+INLINE_FUNCTION void
+wait_for_flash_ready (void) {
+	while (NRF_NVMC->READYNEXT == 0);
+}
+
+static bool
+io_erase_nvm_page (io_t *io,uint32_t *page_address) {
+	if (NRF_NVMC->CONFIG == (NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos)) {
+
+		ENTER_CRITICAL_SECTION(io);
+		
+		// Enable erase.
+		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Een << NVMC_CONFIG_WEN_Pos);
+		__ISB();
+		__DSB();
+
+		NRF_NVMC->ERASEPAGE = (uint32_t) page_address;
+		wait_for_flash_ready ();
+		
+		// back to read only
+		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos);
+		__ISB();
+		__DSB();
+
+		EXIT_CRITICAL_SECTION(io);
+		
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static bool
+io_write_nvm_page (io_t *io,uint32_t const *data,uint32_t num_words,uint32_t *write_address) {
+	if (NRF_NVMC->CONFIG == (NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos)) {
+		uint32_t i;
+
+		ENTER_CRITICAL_SECTION (io);
+		
+		// Enable erase.
+		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Een << NVMC_CONFIG_WEN_Pos);
+		__ISB();
+		__DSB();
+
+		NRF_NVMC->ERASEPAGE = (uint32_t) write_address;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy);
+		
+		// Enable write.
+		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Wen << NVMC_CONFIG_WEN_Pos);
+		__ISB();
+		__DSB();
+
+		for (i = 0; i < num_words; i++) {
+			write_address[i] = data[i];
+			wait_for_flash_ready();
+		}
+		
+		// back to read only
+		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos);
+		__ISB();
+		__DSB();
+
+		EXIT_CRITICAL_SECTION (io);
+		
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static bool
+nrf52840_io_config_clear_first_run (io_t *io) {
+	if (ioc.first_run_flag == IO_FIRST_RUN_SET) {
+		io_persistant_state_t new_ioc = ioc;
+		new_ioc.first_run_flag = IO_FIRST_RUN_CLEAR;
+
+//		io_gererate_uid (io,&new_ioc.uid);
+//		io_gererate_authentication_key_pair (io,&new_ioc.secret,&new_ioc.shared);
+		
+		io_erase_nvm_page (io,(uint32_t*) &ioc);
+		io_write_nvm_page (
+			io,io_config_u32_ptr(new_ioc),io_config_u32_size(),(uint32_t*) &ioc
+		);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+io_uid_t const*
+nrf52840_io_config_uid (io_t *io) {
+	return &ioc.uid;
+}
+
 //
 // cpu clocks
 //
@@ -1237,6 +1353,8 @@ void
 add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	add_io_implementation_core_methods (io_i);
 
+	io_i->is_first_run = nrf52840_io_config_is_first_run;
+	io_i->clear_first_run = nrf52840_io_config_clear_first_run;
 	io_i->get_byte_memory = nrf52_io_get_byte_memory;
 	io_i->get_short_term_value_memory = nrf52_io_get_stvm;
 	io_i->do_gc = nrf52_do_gc;
@@ -1727,6 +1845,43 @@ TEST_BEGIN(test_time_clock_alarms_1) {
 }
 TEST_END
 
+TEST_BEGIN(test_io_random_1) {
+	uint32_t rand[3];
+
+	rand[0] = io_get_random_u32(TEST_IO);
+	rand[1] = io_get_random_u32(TEST_IO);
+	rand[2] = io_get_random_u32(TEST_IO);
+
+	if (rand[0] == rand[1])	rand[1] = io_get_random_u32(TEST_IO);
+	if (rand[0] == rand[1]) rand[1] = io_get_random_u32(TEST_IO);
+	if (rand[0] == rand[1]) rand[1] = io_get_random_u32(TEST_IO);
+
+	if (rand[1] == rand[2]) rand[2] = io_get_random_u32(TEST_IO);
+	if (rand[1] == rand[2]) rand[2] = io_get_random_u32(TEST_IO);
+	if (rand[1] == rand[2]) rand[2] = io_get_random_u32(TEST_IO);
+
+	VERIFY(rand[0] != rand[1],NULL);
+	VERIFY(rand[1] != rand[2],NULL);
+
+	rand[0] = io_get_next_prbs_u32(TEST_IO);
+	rand[1] = io_get_next_prbs_u32(TEST_IO);
+	rand[2] = io_get_next_prbs_u32(TEST_IO);
+
+	if (rand[0] == rand[1])	rand[1] = io_get_next_prbs_u32(TEST_IO);
+	if (rand[0] == rand[1]) rand[1] = io_get_next_prbs_u32(TEST_IO);
+	if (rand[0] == rand[1]) rand[1] = io_get_next_prbs_u32(TEST_IO);
+
+	if (rand[1] == rand[2]) rand[2] = io_get_next_prbs_u32(TEST_IO);
+	if (rand[1] == rand[2]) rand[2] = io_get_next_prbs_u32(TEST_IO);
+	if (rand[1] == rand[2]) rand[2] = io_get_next_prbs_u32(TEST_IO);
+
+	VERIFY(rand[0] != rand[1],NULL);
+	VERIFY(rand[1] != rand[2],NULL);
+
+
+}
+TEST_END
+
 
 UNIT_SETUP(setup_io_cpu_unit_test) {
 	return VERIFY_UNIT_CONTINUE;
@@ -1741,6 +1896,7 @@ io_cpu_unit_test (V_unit_test_t *unit) {
 		test_io_events_1,
 		test_io_events_2,
 		test_time_clock_alarms_1,
+		test_io_random_1,
 		0
 	};
 	unit->name = "io cpu";
