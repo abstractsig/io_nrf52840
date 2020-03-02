@@ -31,6 +31,7 @@ void	start_nrf_time_clock (io_t*,nrf_64bit_time_clock_t*);
 	io_value_pipe_t *tasks;\
 	nrf_64bit_time_clock_t tc;\
 	uint32_t prbs_state[4]; \
+	uint32_t first_run;\
 	/**/
 
 typedef struct PACK_STRUCTURE nrf52840_io {
@@ -252,21 +253,16 @@ static NFR_PERSISTANT_MEMORY_SECTION io_persistant_state_t ioc = {
 	.shared = {{0}},
 };
 
-static bool
-nrf52840_io_config_is_first_run (io_t *io) {
-	return ioc.first_run_flag == IO_FIRST_RUN_SET;
-}
-
 INLINE_FUNCTION void
 wait_for_flash_ready (void) {
 	while (NRF_NVMC->READYNEXT == 0);
 }
 
 static bool
-io_erase_nvm_page (io_t *io,uint32_t *page_address) {
+io_erase_nvm_page (uint32_t *page_address) {
 	if (NRF_NVMC->CONFIG == (NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos)) {
 
-		ENTER_CRITICAL_SECTION(io);
+		//ENTER_CRITICAL_SECTION(io);
 		
 		// Enable erase.
 		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Een << NVMC_CONFIG_WEN_Pos);
@@ -281,7 +277,7 @@ io_erase_nvm_page (io_t *io,uint32_t *page_address) {
 		__ISB();
 		__DSB();
 
-		EXIT_CRITICAL_SECTION(io);
+		//EXIT_CRITICAL_SECTION(io);
 		
 		return true;
 	} else {
@@ -290,11 +286,11 @@ io_erase_nvm_page (io_t *io,uint32_t *page_address) {
 }
 
 static bool
-io_write_nvm_page (io_t *io,uint32_t const *data,uint32_t num_words,uint32_t *write_address) {
+io_write_nvm_page (uint32_t const *data,uint32_t num_words,uint32_t *write_address) {
 	if (NRF_NVMC->CONFIG == (NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos)) {
 		uint32_t i;
 
-		ENTER_CRITICAL_SECTION (io);
+		//ENTER_CRITICAL_SECTION (io);
 		
 		// Enable erase.
 		NRF_NVMC->CONFIG = (NVMC_CONFIG_WEN_Een << NVMC_CONFIG_WEN_Pos);
@@ -319,7 +315,7 @@ io_write_nvm_page (io_t *io,uint32_t const *data,uint32_t num_words,uint32_t *wr
 		__ISB();
 		__DSB();
 
-		EXIT_CRITICAL_SECTION (io);
+		//EXIT_CRITICAL_SECTION (io);
 		
 		return true;
 	} else {
@@ -328,7 +324,7 @@ io_write_nvm_page (io_t *io,uint32_t const *data,uint32_t num_words,uint32_t *wr
 }
 
 static bool
-nrf52840_io_config_clear_first_run (io_t *io) {
+nrf52840_io_config_clear_first_run (void) {
 	if (ioc.first_run_flag == IO_FIRST_RUN_SET) {
 		io_persistant_state_t new_ioc = ioc;
 		new_ioc.first_run_flag = IO_FIRST_RUN_CLEAR;
@@ -336,9 +332,9 @@ nrf52840_io_config_clear_first_run (io_t *io) {
 //		io_gererate_uid (io,&new_ioc.uid);
 //		io_gererate_authentication_key_pair (io,&new_ioc.secret,&new_ioc.shared);
 		
-		io_erase_nvm_page (io,(uint32_t*) &ioc);
+		io_erase_nvm_page ((uint32_t*) &ioc);
 		io_write_nvm_page (
-			io,io_config_u32_ptr(new_ioc),io_config_u32_size(),(uint32_t*) &ioc
+			io_config_u32_ptr(new_ioc),io_config_u32_size(),(uint32_t*) &ioc
 		);
 		return true;
 	} else {
@@ -346,7 +342,14 @@ nrf52840_io_config_clear_first_run (io_t *io) {
 	}
 }
 
-io_uid_t const*
+static bool
+nrf52840_io_config_is_first_run (void) {
+	bool first = (ioc.first_run_flag == IO_FIRST_RUN_SET);
+	nrf52840_io_config_clear_first_run ();
+	return first;
+}
+
+static io_uid_t const*
 nrf52840_io_config_uid (io_t *io) {
 	return &ioc.uid;
 }
@@ -1343,18 +1346,20 @@ static io_time_t
 nrf52_get_time (io_t *io) {
 	nrf52840_io_t *this = (nrf52840_io_t*) io;
 	return nrf_64bit_time_clock_get_time (&this->tc);
-//	io_time_t t = {
-//		.nanoseconds = read_64bit_count(&this->tc) * TIME_CLOCK_NS_PER_TICK
-//	};
-//	return t;
+}
+
+static bool
+nrf52840_is_first_run (io_t *io) {
+	nrf52840_io_t *this = (nrf52840_io_t*) io;
+	return this->first_run;
 }
 
 void
 add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	add_io_implementation_core_methods (io_i);
 
-	io_i->is_first_run = nrf52840_io_config_is_first_run;
-	io_i->clear_first_run = nrf52840_io_config_clear_first_run;
+	io_i->is_first_run = nrf52840_is_first_run;
+	io_i->uid = nrf52840_io_config_uid;
 	io_i->get_byte_memory = nrf52_io_get_byte_memory;
 	io_i->get_short_term_value_memory = nrf52_io_get_stvm;
 	io_i->do_gc = nrf52_do_gc;
@@ -1400,12 +1405,18 @@ void
 initialise_cpu_io (io_t *io) {
 	nrf52840_io_t *this = (nrf52840_io_t*) io;
 	this->in_event_thread = false;
+	this->first_run = nrf52840_io_config_is_first_run();
 	register_io_interrupt_handler (
 		io,EVENT_THREAD_INTERRUPT,event_thread,io
 	);
 	NVIC_EnableIRQ (EVENT_THREAD_INTERRUPT);
 	
 	start_nrf_time_clock (io,&this->tc);
+
+	this->prbs_state[0] = io_get_random_u32(io);
+	this->prbs_state[1] = 0xf542d2d3;
+	this->prbs_state[2] = 0x6fa035c3;
+	this->prbs_state[3] = 0x77f2db5b;
 }
 
 static void apply_nrf_cpu_errata (void);
