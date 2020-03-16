@@ -359,7 +359,7 @@ nrf52840_io_config_uid (io_t *io) {
 //
 
 static float64_t
-nrf52_crystal_oscillator_get_frequency (io_cpu_clock_pointer_t this) {
+nrf52_crystal_oscillator_get_current_frequency (io_cpu_clock_pointer_t this) {
 	return 64000000.0;
 }
 
@@ -378,15 +378,13 @@ nrf52_crystal_oscillator_start (io_t *io,io_cpu_clock_pointer_t this) {
 
 EVENT_DATA io_cpu_clock_implementation_t nrf52_crystal_oscillator_implementation = {
 	.specialisation_of = &io_cpu_clock_implementation,
-	.get_frequency = nrf52_crystal_oscillator_get_frequency,
-	.link_input_to_output = NULL,
-	.link_output_to_input = NULL,
+	.get_current_frequency = nrf52_crystal_oscillator_get_current_frequency,
 	.start = nrf52_crystal_oscillator_start,
 	.stop = NULL,
 };
 
 static float64_t
-nrf52_on_chip_oscillator_get_frequency (io_cpu_clock_pointer_t this) {
+nrf52_on_chip_oscillator_get_current_frequency (io_cpu_clock_pointer_t this) {
 	return 64000000.0;
 }
 
@@ -397,19 +395,17 @@ nrf52_on_chip_oscillator_start (io_t *io,io_cpu_clock_pointer_t this) {
 
 EVENT_DATA io_cpu_clock_implementation_t nrf52_on_chip_oscillator_implementation = {
 	.specialisation_of = &io_cpu_clock_implementation,
-	.get_frequency = nrf52_on_chip_oscillator_get_frequency,
-	.link_input_to_output = NULL,
-	.link_output_to_input = NULL,
+	.get_current_frequency = nrf52_on_chip_oscillator_get_current_frequency,
 	.start = nrf52_on_chip_oscillator_start,
 	.stop = NULL,
 };
 
 static float64_t
-nrf52_core_clock_get_frequency (io_cpu_clock_pointer_t clock) {
+nrf52_core_clock_get_current_frequency (io_cpu_clock_pointer_t clock) {
 	nrf52_core_clock_t const *this = (nrf52_core_clock_t const*) (
 		io_cpu_clock_ro_pointer (clock)
 	);
-	return io_cpu_clock_get_frequency (this->input);
+	return io_cpu_clock_get_current_frequency (this->input);
 }
 
 static bool
@@ -423,9 +419,7 @@ nrf52_core_clock_start (io_t *io,io_cpu_clock_pointer_t clock) {
 
 EVENT_DATA io_cpu_clock_implementation_t nrf52_core_clock_implementation = {
 	.specialisation_of = &io_cpu_clock_implementation,
-	.get_frequency = nrf52_core_clock_get_frequency,
-	.link_input_to_output = NULL,
-	.link_output_to_input = NULL,
+	.get_current_frequency = nrf52_core_clock_get_current_frequency,
 	.start = nrf52_core_clock_start,
 	.stop = NULL,
 };
@@ -1292,7 +1286,7 @@ nrf_gpio_pin_set_drive_level (nrf_io_pin_t pin) {
 }
 
 static void
-nrf52_set_io_pin_interrupt (io_t *io,io_pin_t rpin) {
+nrf52_set_io_pin_interrupt (io_t *io,io_pin_t rpin,io_interrupt_handler_t *h) {
 	nrf_io_pin_t pin = {rpin};
 	
 	nrf_gpio_cfg_input(nrf_gpio_pin_map(pin),nrf_gpio_pin_pull_mode(pin));
