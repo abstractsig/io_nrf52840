@@ -6,8 +6,8 @@
 #ifndef io_cpu_H_
 #define io_cpu_H_
 #include <io_core.h>
-#include <nrf52840.h>
-#include <nrf52840_bitfields.h>
+#include <nrf/nrf52840.h>
+#include <nrf/nrf52840_bitfields.h>
 
 typedef struct PACK_STRUCTURE nrf_time_clock {
 
@@ -234,7 +234,7 @@ extern EVENT_DATA io_socket_implementation_t nrf52_spi_implementation;
 //
 #define NRF_PERIPHERAL(P)			P
 #define NRF_GPIOTE_PERIPHERAL		NRF_GPIOTE
-#include <nrf52_sdk.h>
+#include <nrf/nrf52_sdk.h>
 
 #define NFR_PERSISTANT_MEMORY_SECTION __attribute__ ((section(".io_config")))
 
