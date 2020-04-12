@@ -30,7 +30,6 @@ typedef union {
 
 typedef struct PACK_STRUCTURE nrf52_qspi {
 	IO_SOCKET_STRUCT_MEMBERS
-	io_t *io;
 
 	io_encoding_implementation_t const *encoding;
 	NRF_QSPI_Type *qspi_registers;
@@ -109,12 +108,6 @@ nrf52_qspi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t cons
 	return socket;
 }
 
-static io_t*
-nrf52_qspi_get_io (io_socket_t *socket) {
-	nrf52_qspi_t *this = (nrf52_qspi_t*) socket;
-	return this->io;
-}
-
 static size_t
 nrf52_qspi_mtu (io_socket_t const *socket) {
 	return 1024;
@@ -142,7 +135,7 @@ nrf52_identify_flash_chip (nrf52_qspi_t const *this) {
 	) {
 		return true;
 	} else {
-		io_panic (this->io,IO_PANIC_DEVICE_ERROR);
+		io_panic (io_socket_io(this),IO_PANIC_DEVICE_ERROR);
 		return false;
 	}
 }
@@ -243,7 +236,6 @@ EVENT_DATA io_socket_implementation_t nrf52_qspi_implementation = {
 	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_qspi_initialise,
 	.free = io_socket_free_panic,
-	.get_io = nrf52_qspi_get_io,
 	.open = nrf52_qspi_open,
 	.close = nrf52_qspi_close,
 	.is_closed = nrf52_qspi_is_closed,

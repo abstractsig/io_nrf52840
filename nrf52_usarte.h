@@ -9,7 +9,6 @@
 typedef struct PACK_STRUCTURE nrf52_uart {
 	IO_SOCKET_STRUCT_MEMBERS
 	
-	io_t *io;
 	io_encoding_implementation_t const *encoding;
 
 	io_encoding_pipe_t *tx_pipe;
@@ -86,8 +85,8 @@ static void
 nrf_uart_start_rx (nrf52_uart_t *this) {
 
 	if (nrf_io_pin_is_valid(this->cts_pin)) {
-		io_set_pin_to_input(this->io,this->cts_pin.io);
-		while (io_read_pin(this->io,this->cts_pin.io));
+		io_set_pin_to_input(io_socket_io (this),this->cts_pin.io);
+		while (io_read_pin(io_socket_io(this),this->cts_pin.io));
 	}
 
 	this->uart_registers->SHORTS = (
@@ -108,12 +107,12 @@ nrf52_uart_open (io_socket_t *socket) {
 			//
 			// and not hardware flow control
 			//
-			io_set_pin_to_output (this->io,this->rts_pin.io);
-			write_to_io_pin (this->io,this->rts_pin.io,0);
+			io_set_pin_to_output (io_socket_io(this),this->rts_pin.io);
+			write_to_io_pin (io_socket_io(this),this->rts_pin.io,0);
 		}		
 
 		if (nrf_io_pin_is_valid (this->cts_pin)) {
-			io_set_pin_to_input (this->io,this->cts_pin.io);
+			io_set_pin_to_input (io_socket_io(this),this->cts_pin.io);
 		}
 
 		this->uart_registers->BAUDRATE = this->baud_rate;
@@ -155,14 +154,8 @@ nrf52_uart_close (io_socket_t *socket) {
 	NVIC_DisableIRQ (this->interrupt_number);
 	this->uart_registers->ENABLE = 0;
 
-	io_dequeue_event (this->io,io_pipe_event (this->tx_pipe));
-	io_dequeue_event (this->io,io_pipe_event (this->rx_pipe));
-}
-
-static io_t*
-nrf52_uart_get_io (io_socket_t *socket) {
-	nrf52_uart_t *this = (nrf52_uart_t*) socket;
-	return this->io;
+	io_dequeue_event (io_socket_io(this),io_pipe_event (this->tx_pipe));
+	io_dequeue_event (io_socket_io(this),io_pipe_event (this->rx_pipe));
 }
 
 static io_event_t*
@@ -198,7 +191,7 @@ static io_encoding_t*
 nrf52_uart_new_message (io_socket_t *socket) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 	return reference_io_encoding (
-		new_io_encoding (this->encoding,io_get_byte_memory(this->io))
+		new_io_encoding (this->encoding,io_get_byte_memory(io_socket_io(this)))
 	);
 }
 
@@ -242,12 +235,11 @@ void
 nrf52_uart_tx_complete (io_event_t *ev) {
 	nrf52_uart_t *this = ev->user_value;
 	this->uart_registers->EVENTS_TXSTARTED = 0;
-	io_encoding_t *next;
 	
-	if (io_encoding_pipe_get_encoding (this->tx_pipe,&next)) {
-		unreference_io_encoding (next);
+	if (io_encoding_pipe_pop_encoding (this->tx_pipe)) {
+		// done
 	} else {
-		io_panic (this->io,IO_PANIC_SOMETHING_BAD_HAPPENED);
+		io_panic (io_socket_io(this),IO_PANIC_SOMETHING_BAD_HAPPENED);
 	}
 	
 	if (
@@ -255,7 +247,7 @@ nrf52_uart_tx_complete (io_event_t *ev) {
 		&&	this->uart_registers->ENABLE
 		&& io_event_is_valid (io_pipe_event (this->tx_pipe))
 	) {
-		io_enqueue_event (this->io,io_pipe_event (this->tx_pipe));
+		io_enqueue_event (io_socket_io(this),io_pipe_event (this->tx_pipe));
 	}
 }
 
@@ -264,7 +256,7 @@ nrf52_uart_interrupt (void *user_value) {
 	nrf52_uart_t *this = user_value;
 
 	if (this->uart_registers->EVENTS_ERROR) {
-		//io_panic(this->io,PANIC_DEVICE_ERROR);
+		//io_panic(io_socket_io(this),PANIC_DEVICE_ERROR);
 		this->uart_registers->EVENTS_ERROR = 0;
 		this->uart_registers->EVENTS_RXTO = 0;
 		this->uart_registers->EVENTS_ENDRX = 0;
@@ -276,13 +268,13 @@ nrf52_uart_interrupt (void *user_value) {
 		// this is a stopped event, need a flush ...
 		//
 		if (this->uart_registers->RXD.AMOUNT > 0) {
-			io_enqueue_event (this->io,io_pipe_event (this->rx_pipe));
+			io_enqueue_event (io_socket_io(this),io_pipe_event (this->rx_pipe));
 		}
 		this->uart_registers->EVENTS_RXTO = 0;
 	}
 
 	if (this->uart_registers->EVENTS_ENDTX) {
-		io_enqueue_event (this->io,&this->transmit_complete);
+		io_enqueue_event (io_socket_io(this),&this->transmit_complete);
 		this->uart_registers->EVENTS_ENDTX = 0;
 	}
 
@@ -307,7 +299,7 @@ nrf52_uart_interrupt (void *user_value) {
 				this->next_rx_buffer = this->active_rx_buffer;
 				this->active_rx_buffer = temp;
 			}
-			io_enqueue_event (this->io,io_pipe_event (this->rx_pipe));
+			io_enqueue_event (io_socket_io(this),io_pipe_event (this->rx_pipe));
 		}
 		this->uart_registers->EVENTS_ENDRX = 0;
 	}
@@ -327,7 +319,6 @@ EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_uart_initialise,
 	.free = NULL,
-	.get_io = nrf52_uart_get_io,
 	.open = nrf52_uart_open,
 	.close = nrf52_uart_close,
 	.bindr = nrf52_uart_bindr,

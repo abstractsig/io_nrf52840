@@ -10,7 +10,6 @@ typedef struct PACK_STRUCTURE nrf52_spi {
 	IO_SOCKET_STRUCT_MEMBERS
 
 	io_encoding_implementation_t const *encoding;
-	io_t *io;
 
 	NRF_SPI_Type *registers;
 	nrf_io_pin_t mosi_pin;
@@ -90,12 +89,6 @@ nrf52_spi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const
 	return socket;
 }
 
-static io_t*
-nrf52_spi_get_io (io_socket_t *socket) {
-	nrf52_spi_t *this = (nrf52_spi_t*) socket;
-	return this->io;
-}
-
 static size_t
 nrf52_spi_mtu (io_socket_t const *socket) {
 	return 1024;
@@ -145,7 +138,6 @@ EVENT_DATA io_socket_implementation_t nrf52_spi_implementation = {
 	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_spi_initialise,
 	.free = io_socket_free_panic,
-	.get_io = nrf52_spi_get_io,
 	.open = nrf52_spi_open,
 	.close = nrf52_spi_close,
 	.is_closed = nrf52_spi_is_closed,
