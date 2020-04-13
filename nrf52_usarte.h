@@ -12,8 +12,11 @@ typedef struct PACK_STRUCTURE nrf52_uart {
 	io_encoding_implementation_t const *encoding;
 
 	io_encoding_pipe_t *tx_pipe;
-	io_event_t signal_transmit_available;
 	io_event_t transmit_complete;
+
+	// for single bind
+	io_event_t *signal_transmit_available;
+	io_event_t *signal_receive_data_available;
 	
 	io_byte_pipe_t *rx_pipe;
 	uint8_t* rx_buffer[2];
@@ -53,9 +56,6 @@ nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t cons
 	this->tx_pipe = mk_io_encoding_pipe (
 		io_get_byte_memory(io),io_socket_constructor_transmit_pipe_length(C)
 	);
-	initialise_io_event (
-		&this->signal_transmit_available,NULL,this
-	);
 
 	this->rx_pipe = mk_io_byte_pipe (
 		io_get_byte_memory(io),io_socket_constructor_receive_pipe_length(C)
@@ -69,7 +69,9 @@ nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t cons
 	);
 	this->active_rx_buffer = this->rx_buffer[0];
 	this->next_rx_buffer = this->rx_buffer[1];
-
+	this->signal_transmit_available = NULL;
+	this->signal_receive_data_available = NULL;
+	
 	initialise_io_event (
 		&this->transmit_complete,nrf52_uart_tx_complete,this
 	);
@@ -154,36 +156,11 @@ nrf52_uart_close (io_socket_t *socket) {
 	NVIC_DisableIRQ (this->interrupt_number);
 	this->uart_registers->ENABLE = 0;
 
-	io_dequeue_event (io_socket_io(this),io_pipe_event (this->tx_pipe));
-	io_dequeue_event (io_socket_io(this),io_pipe_event (this->rx_pipe));
-}
-
-static io_event_t*
-nrf52_uart_bindr (io_socket_t *socket,io_event_t *rx) {
-	nrf52_uart_t *this = (nrf52_uart_t*) socket;
-	if (io_event_is_active (io_pipe_event(this->rx_pipe))) {
-		merge_into_io_event(rx,io_pipe_event(this->rx_pipe));
-		return io_pipe_event(this->rx_pipe);
-	} else {
-		return NULL;
+	if (this->signal_transmit_available) {
+		io_dequeue_event (io_socket_io (this),this->signal_transmit_available);
 	}
-}
-
-static void*
-get_new_encoding (void *socket) {
-	return io_socket_new_message (socket);
-}
-
-static io_pipe_t*
-nrf52_uart_bindt (io_socket_t *socket,io_event_t *ev) {
-	nrf52_uart_t *this = (nrf52_uart_t*) socket;
-	if (!io_event_is_active (io_pipe_event(this->tx_pipe))) {
-		this->signal_transmit_available = *ev;
-		this->tx_pipe->user_action = get_new_encoding;
-		this->tx_pipe->user_value = this;
-		return (io_pipe_t*) (this->tx_pipe);
-	} else {
-		return NULL;
+	if (this->signal_receive_data_available) {
+		io_dequeue_event (io_socket_io (this),this->signal_receive_data_available);
 	}
 }
 
@@ -245,9 +222,9 @@ nrf52_uart_tx_complete (io_event_t *ev) {
 	if (
 			!nrf_uart_output_next_buffer (this)
 		&&	this->uart_registers->ENABLE
-		&& io_event_is_valid (io_pipe_event (this->tx_pipe))
+		&& this->signal_transmit_available
 	) {
-		io_enqueue_event (io_socket_io(this),io_pipe_event (this->tx_pipe));
+		io_enqueue_event (io_socket_io (this),this->signal_transmit_available);
 	}
 }
 
@@ -268,7 +245,11 @@ nrf52_uart_interrupt (void *user_value) {
 		// this is a stopped event, need a flush ...
 		//
 		if (this->uart_registers->RXD.AMOUNT > 0) {
-			io_enqueue_event (io_socket_io(this),io_pipe_event (this->rx_pipe));
+			if (this->signal_receive_data_available) {
+				io_enqueue_event (
+					io_socket_io (this),this->signal_receive_data_available
+				);
+			}
 		}
 		this->uart_registers->EVENTS_RXTO = 0;
 	}
@@ -299,7 +280,11 @@ nrf52_uart_interrupt (void *user_value) {
 				this->next_rx_buffer = this->active_rx_buffer;
 				this->active_rx_buffer = temp;
 			}
-			io_enqueue_event (io_socket_io(this),io_pipe_event (this->rx_pipe));
+			if (this->signal_receive_data_available) {
+				io_enqueue_event (
+					io_socket_io (this),this->signal_receive_data_available
+				);
+			}
 		}
 		this->uart_registers->EVENTS_ENDRX = 0;
 	}
@@ -321,8 +306,8 @@ EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	.free = NULL,
 	.open = nrf52_uart_open,
 	.close = nrf52_uart_close,
-	.bindr = nrf52_uart_bindr,
-	.bindt = nrf52_uart_bindt,
+	.bind_to_outer_socket = NULL,
+	.bind_inner = NULL,
 	.new_message = nrf52_uart_new_message,
 	.send_message = nrf52_uart_send_message_blocking,
 	.iterate_inner_sockets = NULL,

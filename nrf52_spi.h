@@ -114,16 +114,6 @@ nrf52_spi_is_closed (io_socket_t const *socket) {
 	return (this->registers->ENABLE & SPI_ENABLE_ENABLE_Msk) == 0;
 }
 
-static io_event_t*
-nrf52_spi_bindr (io_socket_t *socket,io_event_t *rx) {
-	return NULL;
-}
-
-static io_pipe_t*
-nrf52_spi_bindt (io_socket_t *socket,io_event_t *ev) {
-	return NULL;
-}
-
 static io_encoding_t*
 nrf52_spi_new_message (io_socket_t *socket) {
 	return NULL;
@@ -141,8 +131,8 @@ EVENT_DATA io_socket_implementation_t nrf52_spi_implementation = {
 	.open = nrf52_spi_open,
 	.close = nrf52_spi_close,
 	.is_closed = nrf52_spi_is_closed,
-	.bindr = nrf52_spi_bindr,
-	.bindt = nrf52_spi_bindt,
+	.bind_to_outer_socket = NULL,
+	.bind_inner = NULL,
 	.new_message = nrf52_spi_new_message,
 	.send_message = nrf52_spi_send_message,
 	.mtu = nrf52_spi_mtu,
