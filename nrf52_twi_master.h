@@ -38,16 +38,15 @@ typedef struct PACK_STRUCTURE nrf52_twi_bus_master {
 	io_twi_transfer_t current_transfer;
 	io_event_t transfer_complete;
 
-	// hash from address to binding ..
-	
 	io_binding_t *slaves;
 	uint32_t number_of_slaves;
+	io_binding_t *round_robin_cursor;
+	
 	uint16_t transmit_pipe_length;
 	uint16_t receive_pipe_length;
 	
 	io_encoding_pipe_t *tx_pipe;
 	const uint8_t *next_byte,*end;
-	io_event_t *signal_transmit_available;
 	io_encoding_pipe_t *rx_pipe;
 	
 	NRF_TWI_Type *registers;
@@ -107,7 +106,7 @@ free_io_port (io_byte_memory_t *bm,io_port_t *this) {
 }
 
 static void	nrf52_twi_master_interrupt (void*);
-static void	nrf52_twi_transfer_complete (io_event_t*);
+static void	nrf52_twi_master_transfer_complete (io_event_t*);
 
 static io_socket_t*
 nrf52_twi_master_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
@@ -118,20 +117,19 @@ nrf52_twi_master_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_
 	this->encoding = C->encoding;
 	this->slaves = NULL;
 	this->number_of_slaves = 0;
+	this->round_robin_cursor = this->slaves;
 	
 	register_io_interrupt_handler (
 		io,this->interrupt_number,nrf52_twi_master_interrupt,this
 	);
 
 	initialise_io_event (
-		&this->transfer_complete,nrf52_twi_transfer_complete,this
+		&this->transfer_complete,nrf52_twi_master_transfer_complete,this
 	);
 
 	this->transmit_pipe_length = C->transmit_pipe_length;
 	this->receive_pipe_length = C->receive_pipe_length;
 
-	// was for binding
-	this->signal_transmit_available = NULL;
 	this->tx_pipe = mk_io_encoding_pipe (
 		io_get_byte_memory(io),io_socket_constructor_transmit_pipe_length(C)
 	);
@@ -241,6 +239,7 @@ nrf52_twi_master_interrupt (void *user_value) {
 		// this is interpteted as failure to communicate with slave,
 		// e.g. slave is powerwered down or address is invalid
 		//
+	
 		io_panic (io_socket_io(this),IO_PANIC_DEVICE_ERROR);
 	}
 	
@@ -285,7 +284,26 @@ nrf_twi_output_next_buffer (nrf52_twi_master_t *this) {
 }
 
 static void
-nrf52_twi_transfer_complete (io_event_t *ev) {
+signal_transmit_available_to_next_slave (nrf52_twi_master_t *this) {
+	io_binding_t *at = this->round_robin_cursor;
+	
+	do {
+		this->round_robin_cursor ++;
+		if ( (this->round_robin_cursor - this->slaves) == this->number_of_slaves) {
+			this->round_robin_cursor = this->slaves;
+		}
+		
+		io_event_t *ev = this->round_robin_cursor->port->tx_available;
+		if (ev) {
+			io_enqueue_event (io_socket_io (this),ev);
+			break;
+		}
+		
+	} while (this->round_robin_cursor != at);
+}
+
+static void
+nrf52_twi_master_transfer_complete (io_event_t *ev) {
 	nrf52_twi_master_t *this = ev->user_value;
 	
 	if (io_encoding_pipe_pop_encoding (this->tx_pipe)) {
@@ -295,9 +313,7 @@ nrf52_twi_transfer_complete (io_event_t *ev) {
 	}
 
 	if (!nrf_twi_output_next_buffer (this)) {
-		if (this->signal_transmit_available) {
-			io_enqueue_event (io_socket_io(this),this->signal_transmit_available);
-		}
+		signal_transmit_available_to_next_slave (this);
 	}
 }
 
@@ -364,12 +380,12 @@ nrf52_twi_master_bind_inner (
 					bm,this->slaves,sizeof(io_binding_t) * (this->number_of_slaves + 1)
 				);
 				
-				if (more != NULL) { 
+				if (more != NULL) {
+					this->round_robin_cursor = (more + (this->round_robin_cursor - this->slaves));
 					this->slaves = more;
 					this->slaves[this->number_of_slaves] = (io_binding_t) {a,p};
 					this->number_of_slaves++;
 				}
-				
 			} else {
 				// out of memory
 			}
@@ -379,8 +395,8 @@ nrf52_twi_master_bind_inner (
 			io_dequeue_event (io_socket_io (socket),p->rx_available);
 			p->tx_available = tx;
 			p->rx_available = rx;
-			// io_pipe_reset (p->transmit_pipe);
-			// io_pipe_reset (p->rx_pipe);
+			reset_io_encoding_pipe (p->transmit_pipe);
+			reset_io_encoding_pipe (p->rx_pipe);
 		}
 
 		return true;
@@ -404,16 +420,6 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	.mtu = nrf52_twi_master_mtu,
 };
 
-/*
-static void
-nrf52_twi_slave_transmit_available_event (io_event_t *ev) {
-}
-
-static void
-nrf52_twi_slave_receive_data_available_event (io_event_t *ev) {
-}
-*/
-
 static io_socket_t*
 nrf52_twi_slave_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
 	nrf52_twi_slave_t *this = (nrf52_twi_slave_t*) socket;
@@ -423,19 +429,6 @@ nrf52_twi_slave_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t
 	
 	this->transmit_available = NULL;
 	this->receive_data_available = NULL;
-	/*
-	initialise_io_event (
-		&this->transmit_available,
-		nrf52_twi_slave_transmit_available_event,
-		this
-	);
-
-	initialise_io_event (
-		&this->receive_data_available,
-		nrf52_twi_slave_receive_data_available_event,
-		this
-	);
-	*/
 	
 	return socket;
 }
@@ -473,8 +466,8 @@ nrf52_twi_slave_bind (io_socket_t *socket,io_address_t a,io_event_t *tx,io_event
 	return io_socket_bind_to_outer_socket (socket,this->bus_master);
 }
 
-bool
-nrf52_twi_slave_bind_to_outer (io_socket_t *socket,io_socket_t *outer) {
+static bool
+nrf52_twi_slave_bind_to_master (io_socket_t *socket,io_socket_t *outer) {
 	nrf52_twi_slave_t *this = (nrf52_twi_slave_t*) socket;
 
 	io_socket_bind_inner (
@@ -513,7 +506,7 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation = {
 	.open = nrf52_twi_slave_open,
 	.close = nrf52_twi_slave_close,
 	.is_closed = nrf52_twi_slave_is_closed,
-	.bind_to_outer_socket = nrf52_twi_slave_bind_to_outer,
+	.bind_to_outer_socket = nrf52_twi_slave_bind_to_master,
 	.bind_inner = nrf52_twi_slave_bind,
 	.new_message = nrf52_twi_slave_new_message,
 	.send_message = nrf52_twi_slave_send_message,
