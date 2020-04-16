@@ -88,6 +88,7 @@ extern EVENT_DATA io_cpu_clock_implementation_t nrf52_core_clock_implementation;
 #include <nrf52_usarte.h>
 #include <nrf52_qspi.h>
 #include <nrf52_twi_master.h>
+#include <nrf52_radio.h>
 
 #ifdef IMPLEMENT_IO_CPU
 //-----------------------------------------------------------------------------
@@ -281,6 +282,7 @@ nrf52_core_clock_start (io_t *io,io_cpu_clock_pointer_t clock) {
 EVENT_DATA io_cpu_clock_implementation_t nrf52_core_clock_implementation = {
 	.specialisation_of = &io_cpu_clock_implementation,
 	.get_current_frequency = nrf52_core_clock_get_current_frequency,
+	.get_input = io_cpu_dependant_clock_get_input,
 	.start = nrf52_core_clock_start,
 	.stop = NULL,
 };
