@@ -185,13 +185,21 @@ io_write_nvm_page (uint32_t const *data,uint32_t num_words,uint32_t *write_addre
 	}
 }
 
+void
+io_generate_uid (io_t *io,io_uid_t *u) {
+	u->words[0] = io_get_random_u32 (io);
+	u->words[1] = io_get_random_u32 (io);
+	u->words[2] = io_get_random_u32 (io);
+	u->words[3] = io_get_random_u32 (io);
+}
+
 static bool
-nrf52840_io_config_clear_first_run (void) {
+nrf52840_io_config_clear_first_run (io_t *io) {
 	if (ioc.first_run_flag == IO_FIRST_RUN_SET) {
 		io_persistant_state_t new_ioc = ioc;
 		new_ioc.first_run_flag = IO_FIRST_RUN_CLEAR;
 
-//		io_gererate_uid (io,&new_ioc.uid);
+		io_generate_uid (io,&new_ioc.uid);
 //		io_gererate_authentication_key_pair (io,&new_ioc.secret,&new_ioc.shared);
 		
 		io_erase_nvm_page ((uint32_t*) &ioc);
@@ -205,9 +213,9 @@ nrf52840_io_config_clear_first_run (void) {
 }
 
 static bool
-nrf52840_io_config_is_first_run (void) {
+nrf52840_io_config_is_first_run (io_t *io) {
 	bool first = (ioc.first_run_flag == IO_FIRST_RUN_SET);
-	nrf52840_io_config_clear_first_run ();
+	nrf52840_io_config_clear_first_run (io);
 	return first;
 }
 
@@ -581,7 +589,7 @@ nrf52840_get_random_u8 (void) {
 	return NRF_RNG->VALUE;
 }
 
-uint32_t
+static uint32_t
 nrf52840_get_random_u32 (void) {
 	uint32_t r = nrf52840_get_random_u8();
 	r <<= 8;
@@ -787,7 +795,7 @@ void
 initialise_cpu_io (io_t *io) {
 	nrf52840_io_t *this = (nrf52840_io_t*) io;
 	this->in_event_thread = false;
-	this->first_run = nrf52840_io_config_is_first_run();
+	this->first_run = nrf52840_io_config_is_first_run(io);
 	register_io_interrupt_handler (
 		io,EVENT_THREAD_INTERRUPT,event_thread,io
 	);
@@ -1176,134 +1184,7 @@ static bool errata_136(void)
     return true;
 }
 #endif /* IMPLEMENT_IO_CPU */
-#ifdef IMPLEMENT_VERIFY_IO_CPU
-
-static void
-test_io_events_1_ev (io_event_t *ev) {
-	*((uint32_t*) ev->user_value) = 1;
-}
-
-TEST_BEGIN(test_io_events_1) {
-	volatile uint32_t a = 0;
-	io_event_t ev;
-		
-	initialise_io_event (&ev,test_io_events_1_ev,(void*) &a);
-
-	io_enqueue_event (TEST_IO,&ev);
-	while (a == 0);
-	VERIFY (a == 1,NULL);
-}
-TEST_END
-
-static uint32_t test_io_events_2_ev_result = 0;
-
-static void
-test_io_events_2_ev (io_event_t *ev) {
-	test_io_events_2_ev_result = io_is_in_event_thread (ev->user_value);
-}
-
-TEST_BEGIN(test_io_events_2) {
-	io_event_t ev;
-		
-	initialise_io_event (&ev,test_io_events_2_ev,TEST_IO);
-
-	test_io_events_2_ev_result = 0;
-	
-	io_enqueue_event (TEST_IO,&ev);
-	io_wait_for_all_events (TEST_IO);
-	
-	VERIFY (test_io_events_2_ev_result == 1,NULL);
-}
-TEST_END
-
-TEST_BEGIN(test_time_clock_alarms_1) {
-	volatile uint32_t a = 0;
-	io_alarm_t alarm;
-	io_event_t ev;
-	io_time_t t;
-	initialise_io_event (&ev,test_io_events_1_ev,(void*) &a);
-	
-	t = io_get_time (TEST_IO);
-	initialise_io_alarm (
-		&alarm,&ev,&ev,
-		(io_time_t) {t.nanoseconds + millisecond_time(200).nanoseconds}
-	);
-
-	io_enqueue_alarm (TEST_IO,&alarm);
-
-	//io_printf (TEST_IO,"from %lld to %lld\n",t.nanoseconds,alarm.when.nanoseconds);
-	
-	while (a == 0);
-	VERIFY (a == 1,NULL);	
-}
-TEST_END
-
-TEST_BEGIN(test_io_random_1) {
-	uint32_t rand[3];
-
-	rand[0] = io_get_random_u32(TEST_IO);
-	rand[1] = io_get_random_u32(TEST_IO);
-	rand[2] = io_get_random_u32(TEST_IO);
-
-	if (rand[0] == rand[1])	rand[1] = io_get_random_u32(TEST_IO);
-	if (rand[0] == rand[1]) rand[1] = io_get_random_u32(TEST_IO);
-	if (rand[0] == rand[1]) rand[1] = io_get_random_u32(TEST_IO);
-
-	if (rand[1] == rand[2]) rand[2] = io_get_random_u32(TEST_IO);
-	if (rand[1] == rand[2]) rand[2] = io_get_random_u32(TEST_IO);
-	if (rand[1] == rand[2]) rand[2] = io_get_random_u32(TEST_IO);
-
-	VERIFY(rand[0] != rand[1],NULL);
-	VERIFY(rand[1] != rand[2],NULL);
-
-	rand[0] = io_get_next_prbs_u32(TEST_IO);
-	rand[1] = io_get_next_prbs_u32(TEST_IO);
-	rand[2] = io_get_next_prbs_u32(TEST_IO);
-
-	if (rand[0] == rand[1])	rand[1] = io_get_next_prbs_u32(TEST_IO);
-	if (rand[0] == rand[1]) rand[1] = io_get_next_prbs_u32(TEST_IO);
-	if (rand[0] == rand[1]) rand[1] = io_get_next_prbs_u32(TEST_IO);
-
-	if (rand[1] == rand[2]) rand[2] = io_get_next_prbs_u32(TEST_IO);
-	if (rand[1] == rand[2]) rand[2] = io_get_next_prbs_u32(TEST_IO);
-	if (rand[1] == rand[2]) rand[2] = io_get_next_prbs_u32(TEST_IO);
-
-	VERIFY(rand[0] != rand[1],NULL);
-	VERIFY(rand[1] != rand[2],NULL);
-
-
-}
-TEST_END
-
-
-UNIT_SETUP(setup_io_cpu_unit_test) {
-	return VERIFY_UNIT_CONTINUE;
-}
-
-UNIT_TEARDOWN(teardown_io_cpu_unit_test) {
-}
-
-void
-io_cpu_unit_test (V_unit_test_t *unit) {
-	static V_test_t const tests[] = {
-		test_io_events_1,
-		test_io_events_2,
-		test_time_clock_alarms_1,
-		test_io_random_1,
-		0
-	};
-	unit->name = "io cpu";
-	unit->description = "io cpu unit test";
-	unit->tests = tests;
-	unit->setup = setup_io_cpu_unit_test;
-	unit->teardown = teardown_io_cpu_unit_test;
-}
-#define IO_CPU_UNIT_TESTS \
-	io_cpu_unit_test,\
-	/**/
-#else
-#define IO_CPU_UNIT_TESTS
-#endif /* IMPLEMENT_VERIFY_IO_CPU */
+#include <io_cpu_verify.h>
 #endif /* io_cpu_H_ */
 /*
 ------------------------------------------------------------------------------

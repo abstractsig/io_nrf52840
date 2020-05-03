@@ -102,7 +102,7 @@ extern EVENT_DATA io_socket_implementation_t nrf52_qspi_implementation;
 
 
 static io_socket_t*
-nrf52_qspi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
+nrf52_qspi_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_qspi_t *this = (nrf52_qspi_t*) socket;
 	this->io = io;
 	return socket;

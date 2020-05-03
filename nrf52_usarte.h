@@ -49,12 +49,12 @@ static void	nrf52_uart_tx_complete (io_event_t*);
 #define NRF52_UART_RX_DMA_BUFFER_LENGTH 1
 
 static io_socket_t*
-nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
+nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 	this->io = io;
 	
 	this->tx_pipe = mk_io_encoding_pipe (
-		io_get_byte_memory(io),io_socket_constructor_transmit_pipe_length(C)
+		io_get_byte_memory(io),io_settings_transmit_pipe_length(C)
 	);
 
 	this->rx_pipe = mk_io_byte_pipe (
@@ -81,6 +81,11 @@ nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t cons
 	);
 	
 	return socket;
+}
+
+static void
+nrf52_uart_free (io_socket_t *socket) {
+	// no action required, uarts are static
 }
 
 static void
@@ -303,7 +308,7 @@ nrf52_uart_mtu (io_socket_t const *socket) {
 EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_uart_initialise,
-	.free = NULL,
+	.free = nrf52_uart_free,
 	.open = nrf52_uart_open,
 	.close = nrf52_uart_close,
 	.bind_to_outer_socket = NULL,

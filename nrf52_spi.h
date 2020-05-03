@@ -52,7 +52,7 @@ extern EVENT_DATA io_socket_implementation_t nrf52_spi_implementation;
 #define SPI_PSEL_MISO_MSK (SPI_PSEL_MISO_CONNECT_Msk | SPI_PSEL_MISO_PORT_Msk | SPI_PSEL_MISO_PIN_Msk)
 
 static io_socket_t*
-nrf52_spi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
+nrf52_spi_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_spi_t *this = (nrf52_spi_t*) socket;
 	this->io = io;
 	
@@ -87,6 +87,11 @@ nrf52_spi_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const
 	);
 	
 	return socket;
+}
+
+static void
+nrf52_spi_free (io_socket_t *socket) {
+	// no action required, uarts are static
 }
 
 static size_t
@@ -127,7 +132,7 @@ nrf52_spi_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 EVENT_DATA io_socket_implementation_t nrf52_spi_implementation = {
 	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_spi_initialise,
-	.free = io_socket_free_panic,
+	.free = nrf52_spi_free,
 	.open = nrf52_spi_open,
 	.close = nrf52_spi_close,
 	.is_closed = nrf52_spi_is_closed,

@@ -1,6 +1,6 @@
 /*
  *
- * nrf radio
+ * nrf52 radio
  *
  */
 #ifndef nrf52_radio_H_
@@ -9,8 +9,252 @@
 #define NRF_CONNECT_RADIO_MODE					RADIO_MODE_MODE_Nrf_1Mbit
 #define NRF_CONNECT_RADIO_FREQUENCY				2459000000
 #define NRF_BROADCAST_ADDRESS						0x71727374
-
 #define NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH		255UL	// bytes
+
+#include <sockets/io_dlc_socket.h>
+#include <nrf52_radio_layer.h>
+
+#define DEBUG_RADIO 1
+
+struct nrf52_radio_state;
+typedef struct nrf52_radio_state nrf52_radio_state_t;
+
+struct nrf52_radio;
+typedef struct nrf52_radio nrf52_radio_t;
+
+struct nrf52_radio_state {
+	nrf52_radio_state_t const* (*enter) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*open) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*close) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*send) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*end) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*ready) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*tx_ready) (nrf52_radio_t*);
+	nrf52_radio_state_t const* (*busy) (nrf52_radio_t*);
+};
+
+struct PACK_STRUCTURE nrf52_radio {
+	IO_MULTIPLEX_SOCKET_STRUCT_MEMBERS
+	
+	NRF_RADIO_Type *registers;
+	IRQn_Type interrupt_number;
+		
+	nrf52_radio_state_t const *state;
+	
+	io_binding_t *current_transmit_binding;
+	io_encoding_t *current_receive_packet;
+	
+	io_event_t tx_ready_event;
+	io_event_t radio_address_event;
+	io_event_t radio_end_event;
+	io_event_t radio_ready_event;
+	io_event_t send_event;
+
+	io_time_t time_of_last_end_event;
+
+	uint32_t frequency;
+	uint32_t mode;
+	uint32_t tx_power;
+};
+
+io_encoding_t* nrf52_radio_new_transmit_message (io_socket_t*);
+size_t nrf52_radio_mtu (io_socket_t const*);
+
+extern EVENT_DATA io_socket_implementation_t nrf52_radio_socket_implementation;
+extern EVENT_DATA io_encoding_implementation_t nrf52_radio_encoding_implementation;
+ 
+INLINE_FUNCTION io_encoding_t*
+mk_nrf52_radio_encoding (io_byte_memory_t *bm) {
+	return nrf52_radio_encoding_implementation.make_encoding(bm);
+}
+
+INLINE_FUNCTION bool
+is_nrf52_radio_encoding (io_encoding_t const *encoding) {
+	return io_is_encoding_of_type (
+		encoding,&nrf52_radio_encoding_implementation
+	);
+}
+
+uint32_t		generate_nrf52_radio_address (io_t*);
+
+#ifdef IMPLEMENT_NRF52_RADIO
+//-----------------------------------------------------------------------------
+//
+// Implementtaion
+//
+//-----------------------------------------------------------------------------
+
+
+uint32_t
+generate_nrf52_radio_address (io_t *io) {
+	uint32_t addr = 0;
+	do {
+		addr = io_get_random_u32 (io);
+	} while (addr == 0 && addr == NRF_BROADCAST_ADDRESS);
+	
+	return addr;
+}
+
+//
+// inline io state implementation
+//
+static void nrf52_radio_address_event (io_event_t*);
+static void nrf52_radio_tx_ready_event (io_event_t*);
+static void nrf52_radio_send_event (io_event_t*);
+static void nrf52_radio_end_event (io_event_t*);
+static void nrf52_radio_ready_event (io_event_t*);
+static void nrf52_radio_interrupt_handler (void*);
+static void nrf52_radio_enter_current_state (nrf52_radio_t*);
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_power_off;
+
+static io_socket_t*
+nrf52_radio_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
+	nrf52_radio_t *this = (nrf52_radio_t*) socket;
+
+	initialise_io_multiplex_socket (
+		(io_multiplex_socket_t*) socket,io,C->transmit_pipe_length,C->receive_pipe_length
+	);
+
+	if (is_invalid_io_address (io_socket_address(socket))) {
+		io_socket_address(socket) = def_io_u32_address (io_uid (io)->words[0]);
+	}
+	
+	this->mode = NRF_CONNECT_RADIO_MODE;
+	this->frequency = NRF_CONNECT_RADIO_FREQUENCY;
+	this->tx_power = 8;
+	this->current_transmit_binding = NULL;
+	this->current_receive_packet = NULL;
+	
+	initialise_io_event (
+		&this->radio_ready_event,nrf52_radio_ready_event,this
+	);
+
+	initialise_io_event (
+		&this->radio_end_event,nrf52_radio_end_event,this
+	);
+
+	initialise_io_event (
+		&this->send_event,nrf52_radio_send_event,this
+	);
+
+	initialise_io_event (
+		&this->tx_ready_event,nrf52_radio_tx_ready_event,this
+	);
+
+	initialise_io_event (
+		&this->radio_address_event,nrf52_radio_address_event,this
+	);
+
+	register_io_interrupt_handler (
+		io,this->interrupt_number,nrf52_radio_interrupt_handler,this
+	);
+
+	this->state = &nrf52_radio_power_off;
+	nrf52_radio_enter_current_state (this);
+
+	return socket;
+}
+
+INLINE_FUNCTION nrf52_radio_state_t const*
+call_radio_state_enter (nrf52_radio_t *radio) {
+	return radio->state->enter (radio);
+}
+
+static void
+nrf52_radio_enter_current_state (nrf52_radio_t *this) {
+	nrf52_radio_state_t const *current = this->state;
+	nrf52_radio_state_t const *next = call_radio_state_enter (this);
+	if (next != current) {
+		this->state = next;
+		 nrf52_radio_enter_current_state (this);
+	}
+}
+
+static void
+call_state (nrf52_radio_t *this,nrf52_radio_state_t const* (*fn) (nrf52_radio_t*)) {
+	nrf52_radio_state_t const *current = this->state;
+	nrf52_radio_state_t const *next = fn (this);
+	if (next != current) {
+		this->state = next;
+		 nrf52_radio_enter_current_state (this);
+	}
+}
+
+void
+nrf52_radio_address_event (io_event_t *ev) {
+	nrf52_radio_t *this = ev->user_value;
+	call_state (this,this->state->busy);
+}
+
+static void
+nrf52_radio_tx_ready_event (io_event_t *ev) {
+	nrf52_radio_t *this = ev->user_value;
+	call_state (this,this->state->tx_ready);
+}
+
+static void
+nrf52_radio_send_event (io_event_t *ev) {
+	nrf52_radio_t *this = ev->user_value;
+	call_state (this,this->state->send);
+}
+
+//
+// end event happens on completion of tx or rx
+//
+static void
+nrf52_radio_end_event (io_event_t *ev) {
+	nrf52_radio_t *this = ev->user_value;
+	call_state (this,this->state->end);
+}
+
+static void
+nrf52_radio_ready_event (io_event_t *ev) {
+	nrf52_radio_t *this = ev->user_value;
+	call_state (this,this->state->ready);
+}
+
+static void
+nrf52_radio_interrupt_handler (void *user_value) {
+	nrf52_radio_t *this = user_value;
+	NRF_RADIO_Type *radio = this->registers;
+	
+	if (radio->EVENTS_END) {
+		this->time_of_last_end_event = io_get_time (this->io);
+		radio->EVENTS_END = 0;
+		io_enqueue_event (this->io,&this->radio_end_event);
+	}
+
+	if (radio->EVENTS_ADDRESS) {
+		radio->EVENTS_ADDRESS = 0;
+		io_enqueue_event (this->io,&this->radio_address_event);
+	}
+	
+	if (radio->EVENTS_PHYEND) {
+		// PHYEND is only generated in Ble_LR125Kbit, Ble_LR500Kbit and
+		// Ieee802154_250Kbit modes
+		radio->EVENTS_PHYEND = 0;
+	}
+	
+	if (radio->EVENTS_READY) {
+		radio->EVENTS_READY = 0;
+		io_enqueue_event (this->io,&this->radio_ready_event);
+	}
+
+	if (radio->EVENTS_TXREADY) {
+		radio->EVENTS_TXREADY = 0;
+		io_enqueue_event (this->io,&this->tx_ready_event);
+	}
+
+	if (radio->EVENTS_RXREADY) {
+		radio->EVENTS_RXREADY = 0;
+	}
+
+	if (radio->EVENTS_DISABLED) {
+		radio->EVENTS_DISABLED = 0;
+	}
+}
+
 
 //
 // Packet configuration:
@@ -70,218 +314,63 @@
 
 /*
  *-----------------------------------------------------------------------------
- *-----------------------------------------------------------------------------
  *
- * radio states
+ * nrf52_radio_power_on --
  *
- *               power_off
- *                 |                             
- *                 v
- *               disabled
- *                 |                             
- *                 v                             
- *               receive_ramp_up <---.
- *                 |                 |
- *                 v                 |
- *         .---> receive_idle        |
- *         |       |                 |
- *         |       v                 |
- *         |     receive_listen  ---------> transmit_ramp_up
- *         |       |                 |        |   
- *         |       v                 |        v
- *         `---  receive_busy         `---- transmit_idle  <--.
- *                                            |               |
- *                                            v               |
- *                                          transmit_busy  ---'
- *
- *-----------------------------------------------------------------------------
  *-----------------------------------------------------------------------------
  */
-
-struct nrf52_radio_state;
-typedef struct nrf52_radio_state nrf52_radio_state_t;
-
-struct nrf52_radio;
-typedef struct nrf52_radio nrf52_radio_t;
-
-struct nrf52_radio_state {
-	nrf52_radio_state_t const* (*enter) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*open) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*close) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*send) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*end) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*ready) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*tx_ready) (nrf52_radio_t*);
-	nrf52_radio_state_t const* (*busy) (nrf52_radio_t*);
-};
-
-struct PACK_STRUCTURE nrf52_radio {
-	IO_MEDIA_SOCKET_STRUCT_MEMBERS
+static void
+nrf52_radio_power_on (nrf52_radio_t *this) {
+	NRF_RADIO_Type *radio	= this->registers;
 	
-	NRF_RADIO_Type *registers;
-	io_encoding_implementation_t const *encoding;
+	radio->POWER = 1;
+
+	radio->SHORTS          = 0;
+	radio->EVENTS_DISABLED = 0;
+	radio->TASKS_DISABLE   = 1;
+	while (radio->EVENTS_DISABLED == 0);
+	radio->EVENTS_DISABLED = 0;
 	
-	nrf52_radio_state_t const *state;
+	radio->PCNF0 = NRF_PACKET_CONFIGURATION_PCNF0;
+	radio->PCNF1 = NRF_PACKET_CONFIGURATION_PCNF1;
+	radio->CRCCNF = NRF_PACKET_CONFIGURATION_CRCCNF;
+	radio->CRCPOLY = NRF_PACKET_CONFIGURATION_CRCPOLY;
+	radio->CRCINIT = NRF_PACKET_CONFIGURATION_CRCINIT;
 	
-	io_event_t tx_ready_event;
-	io_event_t radio_address_event;
-	io_event_t radio_end_event;
-	io_event_t radio_ready_event;
-	io_event_t send_event;
+	radio->BASE0 = NRF_BROADCAST_ADDRESS;
+	radio->BASE1 = io_u32_address_value(io_socket_address(this));
+	radio->PREFIX0 = 0;
+	radio->PREFIX1 = 0;
 
-	io_time_t time_of_last_end_event;
-
-};
-
-#ifdef IMPLEMENT_NRF52_RADIO
-//-----------------------------------------------------------------------------
-//
-// Implementtaion
-//
-//-----------------------------------------------------------------------------
-//
-// inline io state implementation
-//
-INLINE_FUNCTION nrf52_radio_state_t const*
-call_radio_state_enter (nrf52_radio_t *radio) {
-	return radio->state->enter (radio);
+	radio->SHORTS = 0;
+	
+	radio->INTENSET = (
+			(1 << RADIO_INTENSET_END_Pos)
+		|	(1 << RADIO_INTENSET_ADDRESS_Pos)
+		|	(1 << RADIO_INTENSET_READY_Pos)
+		|	(1 << RADIO_INTENSET_TXREADY_Pos)
+		|	(1 << RADIO_INTENSET_RXREADY_Pos)
+		|	(1 << RADIO_INTENSET_DISABLED_Pos)
+	);
+	
+//	radio->MODECNF0 = (RADIO_MODECNF0_RU_Fast << RADIO_MODECNF0_RU_Pos);
+	radio->MODECNF0 = (
+			(RADIO_MODECNF0_RU_Default << RADIO_MODECNF0_RU_Pos)
+		|	(RADIO_MODECNF0_DTX_Center << RADIO_MODECNF0_DTX_Pos)
+	);
+	
+	radio->TXADDRESS = 0;
+	radio->RXADDRESSES = (
+		RADIO_RXADDRESSES_ADDR0_Enabled << RADIO_RXADDRESSES_ADDR0_Pos
+	);
 }
+
 
 static void
-enter_current_state (nrf52_radio_t *this) {
-	nrf52_radio_state_t const *current = this->state;
-	nrf52_radio_state_t const *next = call_radio_state_enter (this);
-	if (next != current) {
-		this->state = next;
-		enter_current_state (this);
-	}
-}
-
-static void
-call_state (nrf52_radio_t *this,nrf52_radio_state_t const* (*fn) (nrf52_radio_t*)) {
-	nrf52_radio_state_t const *current = this->state;
-	nrf52_radio_state_t const *next = fn (this);
-	if (next != current) {
-		this->state = next;
-		enter_current_state (this);
-	}
-}
-
-void
-nrf52_radio_address_event (io_event_t *ev) {
+nrf52_radio_open_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->busy);
-}
-
-static void
-nrf52_radio_tx_ready_event (io_event_t *ev) {
-	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->tx_ready);
-}
-
-static void
-nrf52_radio_send_event (io_event_t *ev) {
-	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->send);
-}
-
-//
-// end event happens on completuion of tx or rx
-//
-static void
-nrf52_radio_end_event (io_event_t *ev) {
-	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->end);
-}
-
-static void
-nrf52_radio_ready_event (io_event_t *ev) {
-	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->ready);
-}
-
-static void
-nrf52_radio_interrupt_handler (void *user_value) {
-	nrf52_radio_t *this = user_value;
-	
-	if (NRF_RADIO->EVENTS_END) {
-		this->time_of_last_end_event = io_get_time (this->io);
-		NRF_RADIO->EVENTS_END = 0;
-		io_enqueue_event (this->io,&this->radio_end_event);
-	}
-
-	if (NRF_RADIO->EVENTS_ADDRESS) {
-		NRF_RADIO->EVENTS_ADDRESS = 0;
-		io_enqueue_event (this->io,&this->radio_address_event);
-	}
-	
-	if (NRF_RADIO->EVENTS_PHYEND) {
-		// PHYEND is only generated in Ble_LR125Kbit, Ble_LR500Kbit and
-		// Ieee802154_250Kbit modes
-		NRF_RADIO->EVENTS_PHYEND = 0;
-	}
-	
-	if (NRF_RADIO->EVENTS_READY) {
-		NRF_RADIO->EVENTS_READY = 0;
-		io_enqueue_event (this->io,&this->radio_ready_event);
-	}
-
-	if (NRF_RADIO->EVENTS_TXREADY) {
-		NRF_RADIO->EVENTS_TXREADY = 0;
-		io_enqueue_event (this->io,&this->tx_ready_event);
-	}
-
-	if (NRF_RADIO->EVENTS_RXREADY) {
-		NRF_RADIO->EVENTS_RXREADY = 0;
-	}
-
-	if (NRF_RADIO->EVENTS_DISABLED) {
-		NRF_RADIO->EVENTS_DISABLED = 0;
-	}
-}
-
-static io_socket_t*
-nrf52_radio_initialise (io_socket_t *socket,io_t *io,io_socket_constructor_t const *C) {
-	nrf52_radio_t *this = (nrf52_radio_t*) socket;
-
-	initialise_io_socket (socket,io);
-	io_media_socket_initialise (
-		(io_media_socket_t*) socket,C->transmit_pipe_length,C->receive_pipe_length
-	);
-	
-	this->registers = NRF_RADIO;
-
-	if (this->registers->STATE != RADIO_STATE_STATE_Disabled) {
-		//
-		// goto disable ...
-		//
-	}
-
-	initialise_io_event (
-		&this->radio_ready_event,nrf52_radio_ready_event,this
-	);
-
-	initialise_io_event (
-		&this->radio_end_event,nrf52_radio_end_event,this
-	);
-
-	initialise_io_event (
-		&this->send_event,nrf52_radio_send_event,this
-	);
-
-	initialise_io_event (
-		&this->tx_ready_event,nrf52_radio_tx_ready_event,this
-	);
-
-	initialise_io_event (
-		&this->radio_address_event,nrf52_radio_address_event,this
-	);
-
-	register_io_interrupt_handler (
-		io,RADIO_IRQn,nrf52_radio_interrupt_handler,this
-	);
-
-	return socket;
+	call_state (this,this->state->open);
+	io_byte_memory_free (io_get_byte_memory (io_socket_io (this)),ev);
 }
 
 static bool
@@ -291,6 +380,12 @@ nrf52_radio_open (io_socket_t *socket) {
 			io_get_core_clock (io_socket_io(socket)),
 			&nrf52_crystal_oscillator_implementation)
 	) {
+		io_event_t *ev = io_byte_memory_allocate (
+			io_get_byte_memory (io_socket_io (socket)),sizeof(io_event_t)
+		);
+
+		initialise_io_event (ev,nrf52_radio_open_event,socket);
+		io_enqueue_event (io_socket_io (socket),ev);
 	
 		return true;
 	} else {
@@ -308,9 +403,9 @@ nrf52_radio_is_closed (io_socket_t const *socket) {
 	return this->registers->STATE == RADIO_STATE_STATE_Disabled;
 }
 
-static size_t
+size_t
 nrf52_radio_mtu (io_socket_t const *socket) {
-	return 128;
+	return NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH;
 }
 
 static bool
@@ -318,51 +413,690 @@ nrf52_radio_bind_to_outer_socket (io_socket_t *socket,io_socket_t *outer) {
 	return false;
 }
 
+io_encoding_t*
+nrf52_radio_new_transmit_message (io_socket_t *socket) {
+	io_encoding_t *message = mk_nrf52_radio_encoding (
+		io_get_byte_memory(io_socket_io (socket))
+	);
+	
+	if (message != NULL) {
+		io_layer_t *layer = push_nrf52_radio_transmit_layer (message);
+		if (layer != NULL) {
+			io_layer_set_local_address (layer,message,io_socket_address(socket));
+			io_layer_set_inner_address (layer,message,IO_NULL_LAYER_ID);
+			reference_io_encoding (message);
+		} else {
+			// panic?
+		}
+	}
+	
+	return message;
+}
 
 static io_encoding_t*
-nrf52_radio_new_message (io_socket_t *socket) {
-	nrf52_radio_t *this = (nrf52_radio_t*) socket;
-	return reference_io_encoding (
-		new_io_encoding (this->encoding,io_get_byte_memory(io_socket_io(this)))
+nrf52_radio_new_receive_message (io_socket_t *socket) {
+	io_encoding_t *message = mk_nrf52_radio_encoding (
+		io_get_byte_memory(io_socket_io (socket))
 	);
+	
+	if (message != NULL) {
+		io_layer_t *layer = push_nrf52_radio_receive_layer (message);
+		if (layer != NULL) {
+			io_layer_set_local_address (
+				layer,message,io_socket_address (socket)
+			);
+			reference_io_encoding (message);
+		} else {
+		}
+	}
+	
+	return message;
 }
 
 static bool
 nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
-	return false;
-/*
-	if (is_io_twi_encoding (encoding)) {
-		nrf52_radio_t *this = (nrf52_radio_t*) socket;
-		if (io_encoding_pipe_put_encoding (this->tx_pipe,encoding)) {
-			if (io_encoding_pipe_count_occupied_slots (this->tx_pipe) == 1) {
-				nrf_twi_output_next_buffer (this);
+	if (is_nrf52_radio_encoding (encoding)) {
+		io_layer_t *base = io_encoding_get_outermost_layer (encoding);
+		if (base) {
+			io_binding_t *inner = io_multiplex_socket_find_inner_port (
+				(io_multiplex_socket_t *) socket,
+				io_layer_get_remote_address (base,encoding)
+			);
+			if (inner) {
+				nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (encoding);
+				packet->length = io_encoding_length (encoding) - 1;
+				if (io_encoding_pipe_put_encoding (	inner->port->transmit_pipe,encoding)) {
+					nrf52_radio_t *this = (nrf52_radio_t*) socket;
+					io_enqueue_event (io_socket_io (socket),&this->send_event);
+					unreference_io_encoding (encoding);
+					return true;
+				}
 			}
-			return true;
-		} else {
-			unreference_io_encoding (encoding);
-			return false;
 		}
-	} else {
-		return false;
 	}
-*/
+	unreference_io_encoding (encoding);
+	return false;
 }
 
-EVENT_DATA io_socket_implementation_t nrf52_radio_implementation = {
+EVENT_DATA io_socket_implementation_t nrf52_radio_socket_implementation = {
 	.specialisation_of = &io_physical_socket_implementation_base,
 	.initialise = nrf52_radio_initialise,
 	.free = io_socket_free_panic,
 	.open = nrf52_radio_open,
 	.close = nrf52_radio_close,
 	.is_closed = nrf52_radio_is_closed,
-	.bind_inner = io_media_socket_bind_inner,
+	.bind_inner = io_multiplex_socket_bind_inner,
 	.bind_to_outer_socket = nrf52_radio_bind_to_outer_socket,
-	.new_message = nrf52_radio_new_message,
+	.new_message = nrf52_radio_new_transmit_message,
 	.send_message = nrf52_radio_send_message,
+	.get_receive_pipe = NULL,
+	.iterate_inner_sockets = NULL,
 	.iterate_outer_sockets = NULL,
 	.mtu = nrf52_radio_mtu,
 };
 
+static io_encoding_t* 
+nrf52_radio_encoding_new (io_byte_memory_t *bm) {
+	io_packet_encoding_t *this = io_byte_memory_allocate (
+		bm,sizeof(io_packet_encoding_t)
+	);
+
+	if (this != NULL) {
+		this->implementation = &nrf52_radio_encoding_implementation;
+		this->bm = bm;
+		this = initialise_io_packet_encoding ((io_packet_encoding_t*) this);
+	}
+
+	return (io_encoding_t*) this;
+};
+
+static int32_t
+nrf52_radio_encoding_limit (void) {
+	return NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH;
+}
+
+EVENT_DATA io_encoding_layer_api_t packet_layer_api = {
+	.get_inner_layer = NULL,
+	.get_outer_layer = io_packet_encoding_get_outer_layer,
+	.get_layer = get_packet_encoding_layer,
+	.push_layer = io_packet_encoding_push_layer,
+};
+
+EVENT_DATA io_encoding_implementation_t nrf52_radio_encoding_implementation = {
+	.specialisation_of = &io_binary_encoding_implementation,
+	.decode_to_io_value = io_binary_encoding_decode_to_io_value,
+	.make_encoding = nrf52_radio_encoding_new,
+	.free = io_packet_encoding_free,
+	.get_io = io_binary_encoding_get_io,
+	.grow = io_binary_encoding_grow,
+	.grow_increment = default_io_encoding_grow_increment,
+	.fill = io_binary_encoding_fill_bytes,
+	.append_byte = io_binary_encoding_append_byte,
+	.append_bytes = io_binary_encoding_append_bytes,
+	.pop_last_byte = io_binary_encoding_pop_last_byte,
+	.print = io_binary_encoding_print,
+	.reset = io_binary_encoding_reset,
+	.layer = &packet_layer_api,
+	.get_byte_stream = io_binary_encoding_get_byte_stream,
+	.get_content = io_binary_encoding_get_content,
+	.length = io_binary_encoding_length,
+	.limit = nrf52_radio_encoding_limit,
+};
+
+static nrf52_radio_state_t const*
+nrf52_radio_state_ignore_close (nrf52_radio_t *this) {
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_state_ignore_send (nrf52_radio_t *this) {
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_state_ignore_tx_ready (nrf52_radio_t *this) {
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_state_unexpected_event (nrf52_radio_t *this) {
+	io_panic (io_socket_io (this),IO_PANIC_SOMETHING_BAD_HAPPENED);
+	return this->state;
+}
+
+static void
+nrf52_radio_set_mode (nrf52_radio_t *this) {
+	this->registers->MODE = (
+		(this->mode & RADIO_MODE_MODE_Msk) << RADIO_MODE_MODE_Pos
+	);
+}
+
+static uint32_t
+convert_frequency_in_hz_to_setting (nrf52_radio_t *this) {
+	if (this->registers->FREQUENCY & RADIO_FREQUENCY_MAP_Msk) {
+		return (this->frequency - 2360000000)/1000000;
+	} else {
+		return (this->frequency - 2400000000)/1000000;
+	}
+}
+
+static void
+nrf52_radio_set_frequency (nrf52_radio_t *this) {
+	uint32_t frequency = convert_frequency_in_hz_to_setting (this);
+	this->registers->FREQUENCY = (
+			(RADIO_FREQUENCY_MAP_Default << RADIO_FREQUENCY_MAP_Pos)
+		|	(frequency << RADIO_FREQUENCY_FREQUENCY_Pos)
+	);
+}
+
+static void
+nrf52_radio_set_tx_power (nrf52_radio_t *this) {
+	this->registers->TXPOWER = (
+		(this->tx_power << RADIO_TXPOWER_TXPOWER_Pos)
+	);
+}
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * radio states
+ *
+ *               nrf52_radio_power_off
+ *                 |                             
+ *                 v
+ *               nrf52_radio_disabled
+ *                 |                             
+ *                 v                             
+ *               nrf52_radio_receive_ramp_up <----.
+ *                 |                              |
+ *                 v                              |
+ *         .---> nrf52_radio_receive_idle         |
+ *         |       |                              |
+ *         |       v                              |
+ *         |     nrf52_radio_receive_listen -----------> nrf52_radio_transmit_ramp_up
+ *         |       |                              |        |   
+ *         |       v                              |        v
+ *         `---  nrf52_radio_receive_busy          `---- transmit_idle  <--.
+ *                                                         |               |
+ *                                                         v               |
+ *                                                       transmit_busy  ---'
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_power_off;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_disabled;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_ramp_up;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_idle;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_listen;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_busy;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_ramp_up;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_idle;
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_busy;
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_power_off
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_power_off_state_enter (nrf52_radio_t *this) {
+
+	NVIC_DisableIRQ(this->interrupt_number);
+	
+	io_dequeue_event (this->io,&this->radio_end_event);
+	io_dequeue_event (this->io,&this->radio_address_event);
+	io_dequeue_event (this->io,&this->radio_ready_event);
+	
+	this->registers->POWER = 0;
+
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_power_off_state_open (nrf52_radio_t *this) {
+	nrf52_radio_power_on (this);
+	return &nrf52_radio_disabled;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_power_off = {
+	.enter = nrf52_radio_power_off_state_enter,
+	.open = nrf52_radio_power_off_state_open,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_ignore_tx_ready,
+	.busy = nrf52_radio_state_unexpected_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_disabled
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_disabled_state_enter (nrf52_radio_t *this) {
+
+	nrf52_radio_set_mode (this);
+	nrf52_radio_set_frequency (this);
+	nrf52_radio_set_tx_power (this);
+
+	NVIC_ClearPendingIRQ (this->interrupt_number);
+	NVIC_EnableIRQ(this->interrupt_number);
+	
+	return &nrf52_radio_receive_ramp_up;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_disabled = {
+	.enter = nrf52_radio_disabled_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_ignore_tx_ready,
+	.busy = nrf52_radio_state_unexpected_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_receive_ramp_up
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_receive_ramp_up_state_enter (nrf52_radio_t *this) {
+	//
+	// listen on my address and broadcast address
+	//
+	this->registers->BASE0 = NRF_BROADCAST_ADDRESS;
+	this->registers->RXADDRESSES = (
+			(RADIO_RXADDRESSES_ADDR0_Enabled << RADIO_RXADDRESSES_ADDR0_Pos)
+		|	(RADIO_RXADDRESSES_ADDR1_Enabled << RADIO_RXADDRESSES_ADDR1_Pos)
+	);
+
+	this->registers->EVENTS_CRCOK = 0;
+	this->registers->SHORTS = 0;
+	this->registers->TASKS_RXEN = 1;
+
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_receive_ramp_up_ready_event (nrf52_radio_t *this) {
+	return &nrf52_radio_receive_idle;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_ramp_up = {
+	.enter = nrf52_radio_receive_ramp_up_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_receive_ramp_up_ready_event,
+	.tx_ready = nrf52_radio_state_ignore_tx_ready,
+	.busy = nrf52_radio_state_unexpected_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_receive_idle
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_receive_idle_state_enter (nrf52_radio_t *this) {
+
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	io_printf (
+		io_socket_io (this),"%-*s%-*sreceive idle\n",
+		DBP_FIELD1,"radio",
+		DBP_FIELD2,"state"
+	);
+	#endif
+
+	// do we have any packets to send?
+	io_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
+		(io_multiplex_socket_t*) this
+	);
+	
+	if (next) {
+		return &nrf52_radio_transmit_ramp_up;
+	} else {
+		if (this->current_receive_packet == NULL) {		
+			this->current_receive_packet = nrf52_radio_new_receive_message (
+				(io_socket_t*) this
+			);
+		}
+		
+		if (this->current_receive_packet) {
+
+			this->registers->PACKETPTR = (uint32_t) io_encoding_get_byte_stream (this->current_receive_packet);
+			this->registers->TASKS_START = 1;
+
+		} else {
+			//io_panic (io_socket_io (this),IO_PANIC_OUT_OF_MEMORY);
+		}
+		
+		return &nrf52_radio_receive_listen;
+	}
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_idle = {
+	.enter = nrf52_radio_receive_idle_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_ignore_tx_ready,
+	.busy = nrf52_radio_state_unexpected_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_receive_listen
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_receive_listen_state_enter (nrf52_radio_t *this) {
+
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	io_printf (
+		io_socket_io (this),"%-*s%-*sreceive listen\n",
+		DBP_FIELD1,"radio",
+		DBP_FIELD2,"state"
+	);
+	#endif
+	
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_receive_listen_state_busy_event (nrf52_radio_t *this) {
+	return &nrf52_radio_receive_busy;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_listen = {
+	.enter = nrf52_radio_receive_listen_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_ignore_tx_ready,
+	.busy = nrf52_radio_receive_listen_state_busy_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_receive_busy
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_receive_busy_state_enter (nrf52_radio_t *this) {
+
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	io_printf (
+		io_socket_io (this),"%-*s%-*sreceive busy\n",
+		DBP_FIELD1,"radio",
+		DBP_FIELD2,"state"
+	);
+	#endif
+	
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
+	if (this->registers->CRCSTATUS == 1) {
+		nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (
+			this->current_receive_packet
+		);
+
+		uint8_t const *payload = packet->payload;//(uint8_t const*) (packet + 1);
+		uint32_t from = read_le_uint32 (payload + 1);
+		
+//		fix_io_encoder(this->rx_encoder);
+//		io_packet_length (packet) ++;
+		
+		#if 1 && defined(DEBUG_RADIO)
+		io_printf (
+			io_socket_io (this),"%-*s%-*sreceive packet %u %u from 0x%08x\n",
+			DBP_FIELD1,"radio",
+			DBP_FIELD2,"state",
+			io_encoding_length (this->current_receive_packet),
+			this->registers->RXMATCH,
+			from
+		);
+		#endif
+
+		io_binding_t *binding = io_multiplex_socket_find_inner_port (
+			(io_multiplex_socket_t*) this,def_io_u32_address (from)
+		);
+
+		if (binding == NULL) {
+			//
+			// new inner socket
+			//
+		}
+		
+/*		
+		if (io_diplex_stream_receive ((io_diplex_stream_t*) this,packet)) {
+			// slot took ownership of encoder
+			this->rx_encoder = NULL;
+		} else {
+			io_encoding_reset (this->current_receive_packet);
+		}
+*/
+		
+	} else {
+		io_encoding_reset (this->current_receive_packet);
+	}
+	
+	return &nrf52_radio_receive_idle;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_busy = {
+	.enter = nrf52_radio_receive_busy_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_receive_busy_state_end_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_ignore_tx_ready,
+	.busy = nrf52_radio_state_unexpected_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_transmit_ramp_up
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_transmit_ramp_up_state_enter (nrf52_radio_t *this) {
+
+/*
+	// may use short to bypass tx idle
+	
+	NRF_RADIO->SHORTS = (
+			RADIO_SHORTS_TXREADY_START_Msk 
+		|	RADIO_SHORTS_READY_START_Msk 
+   );
+
+*/
+	this->registers->TASKS_TXEN = 1;
+
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+ready_event_in_transmit_ramp_up (nrf52_radio_t *this) {
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_state_tx_ready_in_transmit_ramp_up (nrf52_radio_t *this) {
+	return &nrf52_radio_transmit_idle;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_ramp_up = {
+	.enter = nrf52_radio_transmit_ramp_up_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = ready_event_in_transmit_ramp_up,
+	.tx_ready = nrf52_radio_state_tx_ready_in_transmit_ramp_up,
+	.busy = nrf52_radio_state_unexpected_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_transmit_idle
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_transmit_idle_state_enter (nrf52_radio_t *this) {
+
+	io_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
+		(io_multiplex_socket_t*) this
+	);
+	
+	if (next != NULL) {
+		io_encoding_t *message;
+
+		if (io_encoding_pipe_peek (this->current_transmit_binding->port->transmit_pipe,&message)) {
+			io_layer_t *layer = io_encoding_get_layer (
+				message,&nrf52_radio_layer_transmit_implementation
+			);
+			
+			if (layer) {
+				nrf52_radio_frame_t *packet = io_encoding_get_byte_stream(message);
+				packet->length = io_encoding_length (message) - 1;
+				
+				//this->registers->BASE0 = layer->remote_address;
+				this->registers->BASE0 = io_u32_address_value (
+					io_layer_get_remote_address(layer,message)
+				);
+				this->registers->TXADDRESS = 0; // logical 0
+				this->registers->PACKETPTR = (uint32_t)  io_encoding_get_byte_stream(message);
+				this->registers->TASKS_START = 1;
+			}
+		
+		} else {
+			// panic
+		}
+		
+		return this->state;
+	} else {
+		io_multiplex_socket_round_robin_signal_transmit_available (
+			(io_multiplex_socket_t*) this
+		);
+		return &nrf52_radio_receive_ramp_up;
+	}
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_state_transmit_idle_busy_event (nrf52_radio_t *this) {
+	return &nrf52_radio_transmit_busy;
+}
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_idle = {
+	.enter = nrf52_radio_transmit_idle_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_unexpected_event,
+	.busy = nrf52_radio_state_transmit_idle_busy_event,
+};
+
+/*
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ *
+ * nrf52_radio_transmit_busy
+ *
+ *-----------------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
+ */
+static nrf52_radio_state_t const*
+nrf52_radio_transmit_busy_state_enter (nrf52_radio_t *this) {
+
+	return this->state;
+}
+
+static nrf52_radio_state_t const*
+nrf52_radio_transmit_busy_state_end_event (nrf52_radio_t *this) {
+
+	io_encoding_pipe_pop_encoding (this->current_transmit_binding->port->transmit_pipe);
+	this->current_transmit_binding = NULL;
+/*
+	io_encoding_t *next;
+	
+	if (io_encoding_pipe_peek (this->tx_pipe,&next)) {
+		#ifdef DEBUG_RADIO
+		io_printf (
+			this->io,
+			"radio sent %u bytes, to=%u\n",
+			io_encoder_get_length(next),io_encoder_get_destination(next)
+		);
+		#endif
+
+		free_io_encoder (next);
+	} else {
+		io_panic (io_socket_io (this),IO_PANIC_SOMETHING_BAD_HAPPENED);
+	}
+*/
+
+	return &nrf52_radio_transmit_idle;
+}
+
+
+static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_busy = {
+	.enter = nrf52_radio_transmit_busy_state_enter,
+	.open = nrf52_radio_state_unexpected_event,
+	.close = nrf52_radio_state_ignore_close,
+	.send = nrf52_radio_state_ignore_send,
+	.end = nrf52_radio_state_unexpected_event,
+	.ready = nrf52_radio_state_unexpected_event,
+	.tx_ready = nrf52_radio_state_unexpected_event,
+	.busy = nrf52_radio_transmit_busy_state_end_event,
+};
 
 #endif /* IMPLEMENT_NRF52_RADIO */
 #endif
