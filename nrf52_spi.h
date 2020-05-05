@@ -130,7 +130,7 @@ nrf52_spi_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_spi_implementation = {
-	.specialisation_of = &io_physical_socket_implementation_base,
+	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_spi_initialise,
 	.free = nrf52_spi_free,
 	.open = nrf52_spi_open,

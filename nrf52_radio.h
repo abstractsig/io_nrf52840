@@ -41,7 +41,7 @@ struct PACK_STRUCTURE nrf52_radio {
 		
 	nrf52_radio_state_t const *state;
 	
-	io_binding_t *current_transmit_binding;
+	io_inner_port_binding_t *current_transmit_binding;
 	io_encoding_t *current_receive_packet;
 	
 	io_event_t tx_ready_event;
@@ -112,9 +112,7 @@ static io_socket_t*
 nrf52_radio_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_radio_t *this = (nrf52_radio_t*) socket;
 
-	initialise_io_multiplex_socket (
-		(io_multiplex_socket_t*) socket,io,C->transmit_pipe_length,C->receive_pipe_length
-	);
+	initialise_io_multiplex_socket (socket,io,C);
 
 	if (is_invalid_io_address (io_socket_address(socket))) {
 		io_socket_address(socket) = def_io_u32_address (io_uid (io)->words[0]);
@@ -259,7 +257,7 @@ nrf52_radio_interrupt_handler (void *user_value) {
 //
 // Packet configuration:
 //
-// S1 size = 0 bits, S0 size = 0 bytes, payload length size = 8 bits
+// S1 size = 0 bits, S0 size = 0 bytes, frame length bit-size = 8 bits
 //
 #define NRF_PACKET_CONFIGURATION_PCNF0 \
 	( \
@@ -278,7 +276,7 @@ nrf52_radio_interrupt_handler (void *user_value) {
 // Bit 25: 1 Whitening enabled
 // Bit 24: 1 Big endian,
 // 4 byte base address length (4 address, keep prefix constant),
-// 0 byte static length, max 255 byte payload .
+// 0 byte static length, max 255 byte frame .
 //
 #define NRF_PACKET_CONFIGURATION_PCNF1 \
 	(	\
@@ -426,7 +424,7 @@ nrf52_radio_new_transmit_message (io_socket_t *socket) {
 			io_layer_set_inner_address (layer,message,IO_NULL_LAYER_ID);
 			reference_io_encoding (message);
 		} else {
-			// panic?
+			io_panic (io_socket_io(socket),IO_PANIC_OUT_OF_MEMORY);
 		}
 	}
 	
@@ -458,7 +456,7 @@ nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 	if (is_nrf52_radio_encoding (encoding)) {
 		io_layer_t *base = io_encoding_get_outermost_layer (encoding);
 		if (base) {
-			io_binding_t *inner = io_multiplex_socket_find_inner_port (
+			io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_binding (
 				(io_multiplex_socket_t *) socket,
 				io_layer_get_remote_address (base,encoding)
 			);
@@ -479,9 +477,10 @@ nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_radio_socket_implementation = {
-	.specialisation_of = &io_physical_socket_implementation_base,
+	.specialisation_of = &io_multiplex_socket_implementation,
 	.initialise = nrf52_radio_initialise,
-	.free = io_socket_free_panic,
+	.reference = io_virtual_socket_increment_reference,
+	.free = io_virtual_socket_free,
 	.open = nrf52_radio_open,
 	.close = nrf52_radio_close,
 	.is_closed = nrf52_radio_is_closed,
@@ -515,15 +514,8 @@ nrf52_radio_encoding_limit (void) {
 	return NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH;
 }
 
-EVENT_DATA io_encoding_layer_api_t packet_layer_api = {
-	.get_inner_layer = NULL,
-	.get_outer_layer = io_packet_encoding_get_outer_layer,
-	.get_layer = get_packet_encoding_layer,
-	.push_layer = io_packet_encoding_push_layer,
-};
-
 EVENT_DATA io_encoding_implementation_t nrf52_radio_encoding_implementation = {
-	.specialisation_of = &io_binary_encoding_implementation,
+	.specialisation_of = &io_packet_encoding_implementation,
 	.decode_to_io_value = io_binary_encoding_decode_to_io_value,
 	.make_encoding = nrf52_radio_encoding_new,
 	.free = io_packet_encoding_free,
@@ -536,7 +528,7 @@ EVENT_DATA io_encoding_implementation_t nrf52_radio_encoding_implementation = {
 	.pop_last_byte = io_binary_encoding_pop_last_byte,
 	.print = io_binary_encoding_print,
 	.reset = io_binary_encoding_reset,
-	.layer = &packet_layer_api,
+	.layer = &io_packet_layer_api,
 	.get_byte_stream = io_binary_encoding_get_byte_stream,
 	.get_content = io_binary_encoding_get_content,
 	.length = io_binary_encoding_length,
@@ -772,7 +764,7 @@ nrf52_radio_receive_idle_state_enter (nrf52_radio_t *this) {
 	#endif
 
 	// do we have any packets to send?
-	io_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
+	io_inner_port_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
 		(io_multiplex_socket_t*) this
 	);
 	
@@ -878,11 +870,8 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 			this->current_receive_packet
 		);
 
-		uint8_t const *payload = packet->payload;//(uint8_t const*) (packet + 1);
+		uint8_t const *payload = packet->content;//(uint8_t const*) (packet + 1);
 		uint32_t from = read_le_uint32 (payload + 1);
-		
-//		fix_io_encoder(this->rx_encoder);
-//		io_packet_length (packet) ++;
 		
 		#if 1 && defined(DEBUG_RADIO)
 		io_printf (
@@ -895,7 +884,7 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 		);
 		#endif
 
-		io_binding_t *binding = io_multiplex_socket_find_inner_port (
+		io_inner_port_binding_t *binding = io_multiplex_socket_find_inner_binding (
 			(io_multiplex_socket_t*) this,def_io_u32_address (from)
 		);
 
@@ -991,7 +980,7 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_ramp_up = {
 static nrf52_radio_state_t const*
 nrf52_radio_transmit_idle_state_enter (nrf52_radio_t *this) {
 
-	io_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
+	io_inner_port_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
 		(io_multiplex_socket_t*) this
 	);
 	

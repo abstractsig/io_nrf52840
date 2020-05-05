@@ -223,9 +223,9 @@ nrf52_qspi_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_qspi_implementation = {
-	.specialisation_of = &io_physical_socket_implementation_base,
+	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_qspi_initialise,
-	.free = io_socket_free_panic,
+	.free = io_virtual_socket_free,
 	.open = nrf52_qspi_open,
 	.close = nrf52_qspi_close,
 	.is_closed = nrf52_qspi_is_closed,

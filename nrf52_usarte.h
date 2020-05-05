@@ -58,7 +58,7 @@ nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	);
 
 	this->rx_pipe = mk_io_byte_pipe (
-		io_get_byte_memory(io),io_socket_constructor_receive_pipe_length(C)
+		io_get_byte_memory(io),io_settings_receive_pipe_length(C)
 	);
 
 	this->rx_buffer[0] = io_byte_memory_allocate (
@@ -306,7 +306,7 @@ nrf52_uart_mtu (io_socket_t const *socket) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
-	.specialisation_of = &io_physical_socket_implementation_base,
+	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_uart_initialise,
 	.free = nrf52_uart_free,
 	.open = nrf52_uart_open,

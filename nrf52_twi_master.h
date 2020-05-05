@@ -51,9 +51,7 @@ static io_socket_t*
 nrf52_twi_master_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_twi_master_t *this = (nrf52_twi_master_t*) socket;
 
-	initialise_io_multiplex_socket (
-		(io_multiplex_socket_t*) socket,io,C->transmit_pipe_length,C->receive_pipe_length
-	);
+	initialise_io_multiplex_socket (socket,io,C);
 	
 	this->encoding = C->encoding;
 	
@@ -278,7 +276,7 @@ nrf52_twi_master_bind_to_outer_socket (io_socket_t *socket,io_socket_t *outer) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
-	.specialisation_of = &io_physical_socket_implementation_base,
+	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_twi_master_initialise,
 	.free = nrf52_twi_master_free,
 	.open = nrf52_twi_master_open,
@@ -291,6 +289,7 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	.iterate_outer_sockets = NULL,
 	.mtu = nrf52_twi_master_mtu,
 };
+
 
 static io_encoding_t*
 nrf52_twi_slave_new_message (io_socket_t *socket) {
@@ -306,10 +305,20 @@ nrf52_twi_slave_new_message (io_socket_t *socket) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation = {
-	SPECIALISE_IO_LEAF_SOCKET_IMPLEMENTATION (
-		&io_leaf_socket_implementation,
-		nrf52_twi_slave_new_message
-	)
+	.specialisation_of = &io_leaf_socket_implementation,
+	.initialise = io_leaf_socket_initialise,
+	.reference = io_counted_socket_increment_reference,
+	.free = io_leaf_socket_free,
+	.open = io_leaf_socket_open,
+	.close = io_leaf_socket_close,
+	.is_closed = io_leaf_socket_is_closed,
+	.bind_to_outer_socket = io_leaf_socket_bind_to_outer,
+	.bind_inner = io_leaf_socket_bind,
+	.new_message = nrf52_twi_slave_new_message,
+	.send_message = io_leaf_socket_send_message,
+	.iterate_inner_sockets = NULL,
+	.iterate_outer_sockets = NULL,
+	.mtu = io_leaf_socket_mtu,
 };
 
 #endif /* IMPLEMENT_IO_CPU */
