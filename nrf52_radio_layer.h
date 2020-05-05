@@ -212,18 +212,19 @@ mk_nrf52_radio_layer_receive (io_packet_encoding_t *packet) {
 	return (io_layer_t*) this;
 }
 
-static io_inner_port_t*
+static io_inner_port_binding_t*
 nrf52_radio_layer_decode (
-	io_layer_t *layer,io_encoding_t *encoding,io_multiplex_socket_t* socket
+	io_layer_t *layer,io_encoding_t *encoding,io_socket_t* socket
 ) {
 	nrf52_radio_frame_t *packet = io_layer_get_byte_stream (layer,encoding);
 
 	if (packet->length >= 8) {
 		io_address_t addr = io_layer_get_remote_address (layer,encoding);
-		io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_binding (socket,addr);
+		io_multiplex_socket_t* mux = (io_multiplex_socket_t*) socket;
+		io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_binding (mux,addr);
 
 		if (inner) {
-			return inner->port;
+			return inner;
 		} else {
 			addr = io_layer_get_inner_address (layer,encoding);
 			
