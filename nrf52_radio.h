@@ -75,7 +75,7 @@ is_nrf52_radio_encoding (io_encoding_t const *encoding) {
 	);
 }
 
-uint32_t		generate_nrf52_radio_address (io_t*);
+io_address_t generate_nrf52_radio_address (io_t*);
 
 #ifdef IMPLEMENT_NRF52_RADIO
 //-----------------------------------------------------------------------------
@@ -85,14 +85,14 @@ uint32_t		generate_nrf52_radio_address (io_t*);
 //-----------------------------------------------------------------------------
 
 
-uint32_t
+io_address_t
 generate_nrf52_radio_address (io_t *io) {
 	uint32_t addr = 0;
 	do {
 		addr = io_get_random_u32 (io);
 	} while (addr == 0 && addr == NRF_BROADCAST_ADDRESS);
 	
-	return addr;
+	return def_io_u32_address (addr);
 }
 
 //

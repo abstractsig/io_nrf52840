@@ -129,12 +129,12 @@ dlc_link (io_t *io,io_address_t a,io_socket_t **outer,io_socket_t **inner) {
 }
 
 static io_socket_t*
-allocate_test_radio_socket (io_t *io) {
+allocate_test_radio_socket (io_t *io,io_address_t address) {
 	io_socket_emulator_t *socket = io_byte_memory_allocate (
 		io_get_byte_memory (io),sizeof(io_socket_emulator_t)
 	);
 	socket->implementation = &nrf52_radio_emulator;
-	socket->address = def_io_u32_address (generate_nrf52_radio_address (io));
+	socket->address = duplicate_io_address (io_get_byte_memory (io),address);
 	return (io_socket_t*) socket;
 }
 
@@ -154,12 +154,12 @@ TEST_BEGIN(test_io_radio_packet_encoding_1) {
 		.receive_pipe_length = 3,
 	};
 		
-	const socket_builder_t network[] = {
-		{0,mk_io_dlc_socket,NULL,false,BINDINGS({0,1},END_OF_BINDINGS)},
-		{1,allocate_test_radio_socket,&radio_settings,false,BINDINGS({1,4},END_OF_BINDINGS)},
-		{2,mk_io_dlc_socket,NULL,false,BINDINGS({2,3},END_OF_BINDINGS)},
-		{3,allocate_test_radio_socket,&radio_settings,false,BINDINGS({3,4},END_OF_BINDINGS)},
-		{4,allocate_io_shared_media,&bus,false,NULL},
+	socket_builder_t network[] = {
+		{0,allocate_io_dlc_socket,IO_DLC_LAYER_ID,NULL,false,BINDINGS({0,1},END_OF_BINDINGS)},
+		{1,allocate_test_radio_socket,generate_nrf52_radio_address (TEST_IO),&radio_settings,false,BINDINGS({1,4},END_OF_BINDINGS)},
+		{2,allocate_io_dlc_socket,IO_DLC_LAYER_ID,NULL,false,BINDINGS({2,3},END_OF_BINDINGS)},
+		{3,allocate_test_radio_socket,generate_nrf52_radio_address (TEST_IO),&radio_settings,false,BINDINGS({3,4},END_OF_BINDINGS)},
+		{4,allocate_io_shared_media,io_invalid_address(),&bus,false,NULL},
 	};
 
 	io_socket_t * socket[SIZEOF(network)] = {0};
