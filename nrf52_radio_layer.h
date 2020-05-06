@@ -85,13 +85,13 @@ nrf52_radio_layer_set_layer_address (
 */
 
 static io_address_t
-nrf52_radio_layer_get_remote_address (io_layer_t *layer,io_encoding_t *encoding) {
+nrf52_radio_layer_get_destination_address (io_layer_t *layer,io_encoding_t *encoding) {
 	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
 	return def_io_u32_address(this->remote_address);
 }
 
 static bool
-nrf52_radio_layer_set_remote_address (
+nrf52_radio_layer_set_destination_address (
 	io_layer_t *layer,io_encoding_t *message,io_address_t local
 ) {
 	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
@@ -169,7 +169,7 @@ free_nrf52_radio_layer (io_layer_t *layer,io_byte_memory_t *bm) {
 }
 
 static io_layer_t*
-nrf52_radio_layer_swap_tx (io_layer_t *layer,io_encoding_t *encoding) {
+nrf52_radio_layer_push_receive_layer_tx (io_layer_t *layer,io_encoding_t *encoding) {
 	return io_encoding_push_layer (
 		encoding,&nrf52_radio_layer_receive_implementation
 	);
@@ -185,13 +185,13 @@ EVENT_DATA io_layer_implementation_t nrf52_radio_layer_transmit_implementation =
 	.any = nrf52_radio_layer_any_address,
 	.make = mk_nrf52_radio_layer_transmit,
 	.free = free_nrf52_radio_layer,
-	.swap = nrf52_radio_layer_swap_tx,
-	.decode = NULL,
+	.push_receive_layer = nrf52_radio_layer_push_receive_layer_tx,
+	.select_inner_binding = NULL,
 	.match_address = nrf52_radio_layer_match_address,
-	.get_remote_address = nrf52_radio_layer_get_remote_address,
-	.set_remote_address = nrf52_radio_layer_set_remote_address,
-	.get_local_address = nrf52_radio_layer_get_source_address,
-	.set_local_address = nrf52_radio_layer_set_source_address,
+	.get_destination_address = nrf52_radio_layer_get_destination_address,
+	.set_destination_address = nrf52_radio_layer_set_destination_address,
+	.get_source_address = nrf52_radio_layer_get_source_address,
+	.set_source_address = nrf52_radio_layer_set_source_address,
 	.get_inner_address = nrf52_radio_layer_get_inner_address,
 	.set_inner_address = nrf52_radio_layer_set_inner_address,
 };
@@ -213,15 +213,15 @@ mk_nrf52_radio_layer_receive (io_packet_encoding_t *packet) {
 }
 
 static io_inner_port_binding_t*
-nrf52_radio_layer_decode (
+nrf52_radio_layer_select_inner_binding (
 	io_layer_t *layer,io_encoding_t *encoding,io_socket_t* socket
 ) {
 	nrf52_radio_frame_t *packet = io_layer_get_byte_stream (layer,encoding);
 
 	if (packet->length >= 8) {
-		io_address_t addr = io_layer_get_remote_address (layer,encoding);
+		io_address_t addr = io_layer_get_destination_address (layer,encoding);
 		io_multiplex_socket_t* mux = (io_multiplex_socket_t*) socket;
-		io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_binding (mux,addr);
+		io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_port_binding (mux,addr);
 
 		if (inner) {
 			return inner;
@@ -239,13 +239,13 @@ EVENT_DATA io_layer_implementation_t nrf52_radio_layer_receive_implementation = 
 	.any = nrf52_radio_layer_any_address,
 	.make = mk_nrf52_radio_layer_receive,
 	.free = free_nrf52_radio_layer,
-	.swap = NULL,
-	.decode = nrf52_radio_layer_decode,
+	.push_receive_layer = NULL,
+	.select_inner_binding = nrf52_radio_layer_select_inner_binding,
 	.match_address = nrf52_radio_layer_match_address,
-	.get_remote_address = nrf52_radio_layer_get_source_address,
-	.set_remote_address = nrf52_radio_layer_set_source_address,
-	.get_local_address = nrf52_radio_layer_get_remote_address,
-	.set_local_address = nrf52_radio_layer_set_remote_address,
+	.get_destination_address = nrf52_radio_layer_get_destination_address,
+	.set_destination_address = nrf52_radio_layer_set_destination_address,
+	.get_source_address = nrf52_radio_layer_get_source_address,
+	.set_source_address = nrf52_radio_layer_set_source_address,
 	.get_inner_address = nrf52_radio_layer_get_inner_address,
 	.set_inner_address = nrf52_radio_layer_set_inner_address,
 };

@@ -198,8 +198,9 @@ nrf52_twi_master_new_message (io_socket_t *socket) {
 	if (message != NULL) {
 		io_layer_t *layer = io_encoding_push_layer (message,&io_twi_layer_implementation);
 		if (layer != NULL) {
-			io_layer_set_local_address (layer,message,io_socket_address(socket));
+			io_layer_set_source_address (layer,message,io_socket_address(socket));
 		} else {
+			io_panic (io_socket_io (socket),IO_PANIC_OUT_OF_MEMORY);
 		}
 	}
 

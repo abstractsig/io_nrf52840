@@ -70,7 +70,7 @@ mk_nrf52_radio_encoding (io_byte_memory_t *bm) {
 
 INLINE_FUNCTION bool
 is_nrf52_radio_encoding (io_encoding_t const *encoding) {
-	return io_is_encoding_of_type (
+	return io_encoding_has_implementation (
 		encoding,&nrf52_radio_encoding_implementation
 	);
 }
@@ -420,7 +420,7 @@ nrf52_radio_new_transmit_message (io_socket_t *socket) {
 	if (message != NULL) {
 		io_layer_t *layer = push_nrf52_radio_transmit_layer (message);
 		if (layer != NULL) {
-			io_layer_set_local_address (layer,message,io_socket_address(socket));
+			io_layer_set_source_address (layer,message,io_socket_address(socket));
 			io_layer_set_inner_address (layer,message,IO_NULL_LAYER_ID);
 			reference_io_encoding (message);
 		} else {
@@ -440,7 +440,7 @@ nrf52_radio_new_receive_message (io_socket_t *socket) {
 	if (message != NULL) {
 		io_layer_t *layer = push_nrf52_radio_receive_layer (message);
 		if (layer != NULL) {
-			io_layer_set_local_address (
+			io_layer_set_source_address (
 				layer,message,io_socket_address (socket)
 			);
 			reference_io_encoding (message);
@@ -456,9 +456,9 @@ nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 	if (is_nrf52_radio_encoding (encoding)) {
 		io_layer_t *base = io_encoding_get_outermost_layer (encoding);
 		if (base) {
-			io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_binding (
+			io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_port_binding (
 				(io_multiplex_socket_t *) socket,
-				io_layer_get_remote_address (base,encoding)
+				io_layer_get_destination_address (base,encoding)
 			);
 			if (inner) {
 				nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (encoding);
@@ -884,7 +884,7 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 		);
 		#endif
 
-		io_inner_port_binding_t *binding = io_multiplex_socket_find_inner_binding (
+		io_inner_port_binding_t *binding = io_multiplex_socket_find_inner_port_binding (
 			(io_multiplex_socket_t*) this,def_io_u32_address (from)
 		);
 
@@ -998,7 +998,7 @@ nrf52_radio_transmit_idle_state_enter (nrf52_radio_t *this) {
 				
 				//this->registers->BASE0 = layer->remote_address;
 				this->registers->BASE0 = io_u32_address_value (
-					io_layer_get_remote_address(layer,message)
+					io_layer_get_destination_address(layer,message)
 				);
 				this->registers->TXADDRESS = 0; // logical 0
 				this->registers->PACKETPTR = (uint32_t)  io_encoding_get_byte_stream(message);

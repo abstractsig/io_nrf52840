@@ -175,7 +175,7 @@ TEST_BEGIN(test_io_radio_packet_encoding_1) {
 			uint32_t addr = read_le_uint32 (packet->source_address);
 			VERIFY (addr == io_u32_address_value (io_socket_address(socket[1])),NULL);
 			
-			nrf52_radio_layer_t *layer = get_nrf52_radio_transmit_layer (encoding);
+			io_layer_t *layer = get_nrf52_radio_transmit_layer (encoding);
 			if (VERIFY (layer != NULL,NULL)) {
 				// because there is only one layer
 				VERIFY (
@@ -183,9 +183,7 @@ TEST_BEGIN(test_io_radio_packet_encoding_1) {
 					NULL
 				);
 				
-				io_address_t dest = io_layer_get_remote_address (
-					(io_layer_t*) layer,encoding
-				);
+				io_address_t dest = io_layer_get_destination_address (layer,encoding);
 				VERIFY (
 					compare_io_addresses (
 						dest,def_io_u32_address(NRF_BROADCAST_ADDRESS)
@@ -193,9 +191,7 @@ TEST_BEGIN(test_io_radio_packet_encoding_1) {
 					NULL
 				);
 
-				io_address_t local = io_layer_get_local_address (
-					(io_layer_t*) layer,encoding
-				);
+				io_address_t local = io_layer_get_source_address (layer,encoding);
 				VERIFY (
 					compare_io_addresses (
 						local,io_socket_address(socket[1])
