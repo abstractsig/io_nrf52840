@@ -196,7 +196,7 @@ nrf52_twi_master_new_message (io_socket_t *socket) {
 	);
 
 	if (message != NULL) {
-		io_layer_t *layer = io_encoding_push_layer (message,&io_twi_layer_implementation);
+		io_layer_t *layer = push_io_twi_transmit_layer (message);
 		if (layer != NULL) {
 			io_layer_set_source_address (layer,message,io_socket_address(socket));
 		} else {
@@ -279,6 +279,7 @@ nrf52_twi_master_bind_to_outer_socket (io_socket_t *socket,io_socket_t *outer) {
 EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_twi_master_initialise,
+	.reference = io_virtual_socket_increment_reference,
 	.free = nrf52_twi_master_free,
 	.open = nrf52_twi_master_open,
 	.close = nrf52_twi_master_close,
@@ -291,10 +292,9 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	.mtu = nrf52_twi_master_mtu,
 };
 
-
 static io_encoding_t*
 nrf52_twi_slave_new_message (io_socket_t *socket) {
-	io_leaf_socket_t *this = (io_leaf_socket_t*) socket;
+	io_adapter_address_t *this = (io_adapter_address_t*) socket;
 	io_encoding_t *message = io_socket_new_message (this->outer_socket);
 
 	io_twi_transfer_t *cmd = get_twi_layer (message);
@@ -306,20 +306,20 @@ nrf52_twi_slave_new_message (io_socket_t *socket) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation = {
-	.specialisation_of = &io_leaf_socket_implementation,
-	.initialise = io_leaf_socket_initialise,
+	.specialisation_of = &io_adapter_address_implementation,
+	.initialise = io_adapter_address_initialise,
 	.reference = io_counted_socket_increment_reference,
-	.free = io_leaf_socket_free,
-	.open = io_leaf_socket_open,
-	.close = io_leaf_socket_close,
-	.is_closed = io_leaf_socket_is_closed,
-	.bind_to_outer_socket = io_leaf_socket_bind_to_outer,
-	.bind_inner = io_leaf_socket_bind,
+	.free = io_adapter_address_free,
+	.open = io_adapter_address_open,
+	.close = io_adapter_address_close,
+	.is_closed = io_adapter_address_is_closed,
+	.bind_to_outer_socket = io_adapter_address_bind_to_outer,
+	.bind_inner = io_adapter_address_bind,
 	.new_message = nrf52_twi_slave_new_message,
-	.send_message = io_leaf_socket_send_message,
+	.send_message = io_adapter_address_send_message,
 	.iterate_inner_sockets = NULL,
 	.iterate_outer_sockets = NULL,
-	.mtu = io_leaf_socket_mtu,
+	.mtu = io_adapter_address_mtu,
 };
 
 #endif /* IMPLEMENT_IO_CPU */

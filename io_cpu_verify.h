@@ -175,7 +175,7 @@ TEST_BEGIN(test_io_radio_packet_encoding_1) {
 			uint32_t addr = read_le_uint32 (packet->source_address);
 			VERIFY (addr == io_u32_address_value (io_socket_address(socket[1])),NULL);
 			
-			io_layer_t *layer = get_nrf52_radio_transmit_layer (encoding);
+			io_layer_t *layer = get_nrf52_radio_layer (encoding);
 			if (VERIFY (layer != NULL,NULL)) {
 				// because there is only one layer
 				VERIFY (

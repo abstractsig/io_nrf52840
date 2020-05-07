@@ -988,9 +988,7 @@ nrf52_radio_transmit_idle_state_enter (nrf52_radio_t *this) {
 		io_encoding_t *message;
 
 		if (io_encoding_pipe_peek (this->current_transmit_binding->port->transmit_pipe,&message)) {
-			io_layer_t *layer = io_encoding_get_layer (
-				message,&nrf52_radio_layer_transmit_implementation
-			);
+			io_layer_t *layer = get_nrf52_radio_layer (message);
 			
 			if (layer) {
 				nrf52_radio_frame_t *packet = io_encoding_get_byte_stream(message);
