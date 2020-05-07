@@ -294,7 +294,7 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 
 static io_encoding_t*
 nrf52_twi_slave_new_message (io_socket_t *socket) {
-	io_adapter_address_t *this = (io_adapter_address_t*) socket;
+	io_adapter_socket_t *this = (io_adapter_socket_t*) socket;
 	io_encoding_t *message = io_socket_new_message (this->outer_socket);
 
 	io_twi_transfer_t *cmd = get_twi_layer (message);
