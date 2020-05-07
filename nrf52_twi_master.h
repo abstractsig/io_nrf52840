@@ -306,20 +306,20 @@ nrf52_twi_slave_new_message (io_socket_t *socket) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation = {
-	.specialisation_of = &io_adapter_address_implementation,
-	.initialise = io_adapter_address_initialise,
+	.specialisation_of = &io_adapter_socket_implementation,
+	.initialise = io_adapter_socket_initialise,
 	.reference = io_counted_socket_increment_reference,
-	.free = io_adapter_address_free,
-	.open = io_adapter_address_open,
-	.close = io_adapter_address_close,
-	.is_closed = io_adapter_address_is_closed,
-	.bind_to_outer_socket = io_adapter_address_bind_to_outer,
-	.bind_inner = io_adapter_address_bind,
+	.free = io_adapter_socket_free,
+	.open = io_adapter_socket_open,
+	.close = io_adapter_socket_close,
+	.is_closed = io_adapter_socket_is_closed,
+	.bind_to_outer_socket = io_adapter_socket_bind_to_outer,
+	.bind_inner = io_adapter_socket_bind,
 	.new_message = nrf52_twi_slave_new_message,
-	.send_message = io_adapter_address_send_message,
+	.send_message = io_adapter_socket_send_message,
 	.iterate_inner_sockets = NULL,
 	.iterate_outer_sockets = NULL,
-	.mtu = io_adapter_address_mtu,
+	.mtu = io_adapter_socket_mtu,
 };
 
 #endif /* IMPLEMENT_IO_CPU */

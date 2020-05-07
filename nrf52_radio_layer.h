@@ -6,7 +6,16 @@
 #ifndef io_nrf52_radio_layer_H_
 #define io_nrf52_radio_layer_H_
 
+void*			get_nrf52_radio_layer (io_encoding_t*);
+io_layer_t*	push_nrf52_radio_transmit_layer (io_encoding_t*);
+io_layer_t*	push_nrf52_radio_receive_layer (io_encoding_t*);
 
+#ifdef IMPLEMENT_NRF52_RADIO
+//-----------------------------------------------------------------------------
+//
+// implementation
+//
+//-----------------------------------------------------------------------------
 typedef struct PACK_STRUCTURE nrf52_radio_frame {
 	uint8_t length;	// not including length byte
 	uint8_t source_address[4];
@@ -19,17 +28,6 @@ typedef struct PACK_STRUCTURE nrf52_radio_layer {
 	uint32_t remote_address;
 } nrf52_radio_layer_t;
 
-void*			get_nrf52_radio_layer (io_encoding_t*);
-io_layer_t*	push_nrf52_radio_transmit_layer (io_encoding_t*);
-io_layer_t*	push_nrf52_radio_receive_layer (io_encoding_t*);
-
-#ifdef IMPLEMENT_NRF52_RADIO
-//-----------------------------------------------------------------------------
-//
-// implementation
-//
-//-----------------------------------------------------------------------------
-
 extern EVENT_DATA io_layer_implementation_t nrf52_radio_layer_implementation;
 
 static nrf52_radio_layer_t*
@@ -40,7 +38,6 @@ mk_nrf52_radio_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 	
 	if (this) {
 		this->implementation = &nrf52_radio_layer_implementation;
-		this->layer_offset_in_byte_stream = io_encoding_length (packet);
 		this->remote_address = 0;
 	}
 	
@@ -52,6 +49,7 @@ mk_nrf52_radio_transmit_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 	nrf52_radio_layer_t *this = mk_nrf52_radio_layer (bm,packet);
 
 	if (this) {
+		this->layer_offset_in_byte_stream = io_encoding_length (packet);
 		io_encoding_fill (packet,0,sizeof(nrf52_radio_frame_t));
 	}
 	
@@ -63,6 +61,9 @@ mk_nrf52_radio_receive_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 	nrf52_radio_layer_t *this = mk_nrf52_radio_layer (bm,packet);
 
 	if (this) {
+		this->layer_offset_in_byte_stream = io_encoding_increment_decode_offest (
+			packet,0
+		);
 		// allow space for max length packet
 		io_encoding_fill ((io_encoding_t*) packet,0,NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH);
 	}
@@ -79,23 +80,6 @@ nrf52_radio_layer_match_address (io_layer_t *layer,io_address_t address) {
 		||	(compare_io_addresses (dest,address) == 0)
 	);
 }	
-
-/*
-static io_address_t
-nrf52_radio_layer_get_layer_address (io_layer_t *layer,io_encoding_t *encoding) {
-	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
-	return def_io_u32_address(this->remote_address);
-}
-
-static bool
-nrf52_radio_layer_set_layer_address (
-	io_layer_t *layer,io_encoding_t *message,io_address_t local
-) {
-	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
-	this->remote_address = io_u32_address_value (local);
-	return true;
-}
-*/
 
 static io_address_t
 nrf52_radio_layer_get_destination_address (io_layer_t *layer,io_encoding_t *encoding) {
@@ -197,14 +181,21 @@ nrf52_radio_layer_select_inner_binding (
 	return NULL;
 }
 
+static bool
+io_nrf52_radio_layer_load_header (io_layer_t *layer,io_encoding_t *encoding) {
+	nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (encoding);
+	packet->length = io_encoding_length (encoding) - 1;
+	return true;
+}
+
 EVENT_DATA io_layer_implementation_t nrf52_radio_layer_implementation = {
-	.specialisation_of = &nrf52_radio_layer_implementation,
+	.specialisation_of = NULL,
 	.any = nrf52_radio_layer_any_address,
 	.free = free_nrf52_radio_layer,
 	.push_receive_layer = nrf52_radio_layer_push_receive_layer,
 	.select_inner_binding = nrf52_radio_layer_select_inner_binding,
 	.match_address = nrf52_radio_layer_match_address,
-	.load_header = NULL,
+	.load_header = io_nrf52_radio_layer_load_header,
 	.get_content = NULL,
 	.get_destination_address = nrf52_radio_layer_get_destination_address,
 	.set_destination_address = nrf52_radio_layer_set_destination_address,
