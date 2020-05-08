@@ -62,12 +62,11 @@ mk_nrf52_radio_receive_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 
 	if (this) {
 		this->layer_offset_in_byte_stream = io_encoding_increment_decode_offest (
-			packet,0
+			packet,sizeof(nrf52_radio_frame_t)
 		);
-
-//		nrf52_radio_frame_t *frame = io_layer_get_byte_stream ((io_layer_t*) this,packet);
-//		io_address_t address;
-		
+		//
+		// this layer gets properties from encoding
+		//
 	}
 	
 	return (io_layer_t*) this;
