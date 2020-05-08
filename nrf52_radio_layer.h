@@ -25,7 +25,7 @@ typedef struct PACK_STRUCTURE nrf52_radio_frame {
 
 typedef struct PACK_STRUCTURE nrf52_radio_layer {
 	IO_LAYER_STRUCT_PROPERTIES
-	uint32_t remote_address;
+	uint32_t destination_address;
 } nrf52_radio_layer_t;
 
 extern EVENT_DATA io_layer_implementation_t nrf52_radio_layer_implementation;
@@ -38,7 +38,7 @@ mk_nrf52_radio_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 	
 	if (this) {
 		this->implementation = &nrf52_radio_layer_implementation;
-		this->remote_address = 0;
+		this->destination_address = 0;
 	}
 	
 	return this;
@@ -64,8 +64,10 @@ mk_nrf52_radio_receive_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 		this->layer_offset_in_byte_stream = io_encoding_increment_decode_offest (
 			packet,0
 		);
-		// allow space for max length packet
-		io_encoding_fill ((io_encoding_t*) packet,0,NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH);
+
+//		nrf52_radio_frame_t *frame = io_layer_get_byte_stream ((io_layer_t*) this,packet);
+//		io_address_t address;
+		
 	}
 	
 	return (io_layer_t*) this;
@@ -74,7 +76,7 @@ mk_nrf52_radio_receive_layer (io_byte_memory_t *bm,io_encoding_t *packet) {
 static bool
 nrf52_radio_layer_match_address (io_layer_t *layer,io_address_t address) {
 	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
-	io_address_t dest = def_io_u32_address(this->remote_address);
+	io_address_t dest = def_io_u32_address(this->destination_address);
 	return (
 			(compare_io_addresses (dest,def_io_u32_address(NRF_BROADCAST_ADDRESS)) == 0)
 		||	(compare_io_addresses (dest,address) == 0)
@@ -84,7 +86,7 @@ nrf52_radio_layer_match_address (io_layer_t *layer,io_address_t address) {
 static io_address_t
 nrf52_radio_layer_get_destination_address (io_layer_t *layer,io_encoding_t *encoding) {
 	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
-	return def_io_u32_address(this->remote_address);
+	return def_io_u32_address(this->destination_address);
 }
 
 static bool
@@ -92,13 +94,13 @@ nrf52_radio_layer_set_destination_address (
 	io_layer_t *layer,io_encoding_t *message,io_address_t local
 ) {
 	nrf52_radio_layer_t *this = (nrf52_radio_layer_t*) layer;
-	this->remote_address = io_u32_address_value (local);
+	this->destination_address = io_u32_address_value (local);
 	return true;
 }
 
 static io_address_t
 nrf52_radio_layer_get_source_address (io_layer_t *layer,io_encoding_t *encoding) {
-	nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (encoding);
+	nrf52_radio_frame_t *packet = io_layer_get_byte_stream (layer,encoding);
 	uint32_t addr = read_le_uint32 (packet->source_address);
 	return def_io_u32_address(addr);
 }
@@ -122,7 +124,7 @@ nrf52_radio_layer_set_source_address (
 
 static io_address_t
 nrf52_radio_layer_get_inner_address (io_layer_t *layer,io_encoding_t *encoding) {
-	nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (encoding);
+	nrf52_radio_frame_t *packet = io_layer_get_byte_stream (layer,encoding);
 	uint32_t addr = read_le_uint32 (packet->inner_layer_id);
 	return def_io_u32_address(addr);
 }

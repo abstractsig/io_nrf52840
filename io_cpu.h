@@ -110,7 +110,7 @@ extern EVENT_DATA io_cpu_clock_implementation_t nrf52_core_clock_implementation;
 static NFR_PERSISTANT_MEMORY_SECTION io_persistant_state_t ioc = {
 	.first_run_flag = IO_FIRST_RUN_SET,
 	.power_cycles = 0,
-	.uid = {{0}},
+	.uid = {.bytes = {STATIC_UID}},
 	.secret = {{0}},
 	.shared = {{0}},
 };
@@ -199,7 +199,10 @@ nrf52840_io_config_clear_first_run (io_t *io) {
 		io_persistant_state_t new_ioc = ioc;
 		new_ioc.first_run_flag = IO_FIRST_RUN_CLEAR;
 
+		#ifdef GENERATE_UID
 		io_generate_uid (io,&new_ioc.uid);
+		#endif
+		
 //		io_gererate_authentication_key_pair (io,&new_ioc.secret,&new_ioc.shared);
 		
 		io_erase_nvm_page ((uint32_t*) &ioc);

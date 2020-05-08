@@ -116,7 +116,7 @@ nrf52_radio_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	initialise_io_multiplex_socket (socket,io,C);
 
 	if (is_invalid_io_address (io_socket_address(socket))) {
-		io_socket_address(socket) = def_io_u32_address (io_uid (io)->words[0]);
+		io_socket_address(socket) = def_io_u32_address (io_uid (io)->words[3]);
 	}
 	
 	this->mode = NRF_CONNECT_RADIO_MODE;
@@ -431,28 +431,6 @@ nrf52_radio_socket_new_message (io_socket_t *socket) {
 	return message;
 }
 
-/*
-static io_encoding_t*
-nrf52_radio_new_receive_message (io_socket_t *socket) {
-	io_encoding_t *message = mk_nrf52_radio_encoding (
-		io_get_byte_memory(io_socket_io (socket))
-	);
-	
-	if (message != NULL) {
-		io_layer_t *layer = push_nrf52_radio_receive_layer (message);
-		if (layer != NULL) {
-			io_layer_set_source_address (
-				layer,message,io_socket_address (socket)
-			);
-			reference_io_encoding (message);
-		} else {
-		}
-	}
-	
-	return message;
-}
-*/
-
 static bool
 nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 	if (is_nrf52_radio_encoding (encoding)) {
@@ -466,8 +444,6 @@ nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 					io_layer_get_source_address (inner_layer,encoding)
 				);
 				if (inner) {
-					//nrf52_radio_frame_t *packet = io_encoding_get_byte_stream (encoding);
-					//packet->length = io_encoding_length (encoding) - 1;
 					if (io_encoding_pipe_put_encoding (	inner->port->transmit_pipe,encoding)) {
 						nrf52_radio_t *this = (nrf52_radio_t*) socket;
 						this->current_transmit_binding = inner;
@@ -781,22 +757,6 @@ nrf52_radio_receive_idle_state_enter (nrf52_radio_t *this) {
 	} else {
 		this->registers->PACKETPTR = (uint32_t) this->receieve_buffer;
 		this->registers->TASKS_START = 1;
-		
-/*
-		if (this->current_receive_packet == NULL) {		
-			this->current_receive_packet = nrf52_radio_new_receive_message (
-				(io_socket_t*) this
-			);
-		}
-		
-		if (this->current_receive_packet) {
-
-
-		} else {
-			//io_panic (io_socket_io (this),IO_PANIC_OUT_OF_MEMORY);
-		}
-*/
-		
 		return &nrf52_radio_receive_listen;
 	}
 }
@@ -877,8 +837,22 @@ nrf52_radio_receive_busy_state_enter (nrf52_radio_t *this) {
 static nrf52_radio_state_t const*
 nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 	if (this->registers->CRCSTATUS == 1) {
-		
+		io_encoding_t *frame = mk_nrf52_radio_encoding (
+			io_get_byte_memory (io_socket_io (this))
+		);
+		if (frame != NULL) {
+			io_encoding_append_bytes (frame,this->receieve_buffer,this->receieve_buffer[0]);
+			
+			io_layer_t *layer = push_nrf52_radio_receive_layer (frame);
+			if (layer != NULL) {
 
+			} else {
+				io_panic (io_socket_io(this),IO_PANIC_OUT_OF_MEMORY);
+			}
+		} else {
+			io_panic (io_socket_io(this),IO_PANIC_OUT_OF_MEMORY);
+		}
+		
 		#if defined(DEBUG_RADIO) && DEBUG_RADIO
 		uint32_t from = read_le_uint32 (this->receieve_buffer + 1);
 		io_printf (
@@ -890,8 +864,19 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 			from
 		);
 		#endif
+
 	
 /*
+		
+		if (message != NULL) {
+			io_layer_t *layer = push_nrf52_radio_receive_layer (message);
+			if (layer != NULL) {
+
+			} else {
+				io_panic (io_socket_io(socket),IO_PANIC_OUT_OF_MEMORY);
+			}
+		}
+
 		io_inner_port_binding_t *binding = io_multiplex_socket_find_inner_port_binding (
 			(io_multiplex_socket_t*) this,def_io_u32_address (from)
 		);
