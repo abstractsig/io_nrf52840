@@ -141,7 +141,7 @@ nrf52_identify_flash_chip (nrf52_qspi_t const *this) {
 }
 
 static bool
-nrf52_qspi_open (io_socket_t *socket) {
+nrf52_qspi_open (io_socket_t *socket,io_socket_open_flag_t flag) {
 	nrf52_qspi_t *this = (nrf52_qspi_t*) socket;
 	NRF_QSPI_Type *qspi = this->qspi_registers;
 	

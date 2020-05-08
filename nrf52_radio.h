@@ -39,7 +39,7 @@ struct PACK_STRUCTURE nrf52_radio {
 	NRF_RADIO_Type *registers;
 	IRQn_Type interrupt_number;
 		
-	nrf52_radio_state_t const *state;
+	nrf52_radio_state_t const *radio_state;
 	
 	io_inner_port_binding_t *current_transmit_binding;
 	
@@ -98,7 +98,7 @@ generate_nrf52_radio_address (io_t *io) {
 }
 
 //
-// inline io state implementation
+// radio states
 //
 static void nrf52_radio_address_event (io_event_t*);
 static void nrf52_radio_tx_ready_event (io_event_t*);
@@ -149,7 +149,7 @@ nrf52_radio_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 		io,this->interrupt_number,nrf52_radio_interrupt_handler,this
 	);
 
-	this->state = &nrf52_radio_power_off;
+	this->radio_state = &nrf52_radio_power_off;
 	nrf52_radio_enter_current_state (this);
 
 	return socket;
@@ -157,45 +157,45 @@ nrf52_radio_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 
 INLINE_FUNCTION nrf52_radio_state_t const*
 call_radio_state_enter (nrf52_radio_t *radio) {
-	return radio->state->enter (radio);
+	return radio->radio_state->enter (radio);
 }
 
 static void
 nrf52_radio_enter_current_state (nrf52_radio_t *this) {
-	nrf52_radio_state_t const *current = this->state;
+	nrf52_radio_state_t const *current = this->radio_state;
 	nrf52_radio_state_t const *next = call_radio_state_enter (this);
 	if (next != current) {
-		this->state = next;
+		this->radio_state = next;
 		 nrf52_radio_enter_current_state (this);
 	}
 }
 
 static void
 call_state (nrf52_radio_t *this,nrf52_radio_state_t const* (*fn) (nrf52_radio_t*)) {
-	nrf52_radio_state_t const *current = this->state;
+	nrf52_radio_state_t const *current = this->radio_state;
 	nrf52_radio_state_t const *next = fn (this);
 	if (next != current) {
-		this->state = next;
-		 nrf52_radio_enter_current_state (this);
+		this->radio_state = next;
+		nrf52_radio_enter_current_state (this);
 	}
 }
 
 void
 nrf52_radio_address_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->busy);
+	call_state (this,this->radio_state->busy);
 }
 
 static void
 nrf52_radio_tx_ready_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->tx_ready);
+	call_state (this,this->radio_state->tx_ready);
 }
 
 static void
 nrf52_radio_send_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->send);
+	call_state (this,this->radio_state->send);
 }
 
 //
@@ -204,13 +204,13 @@ nrf52_radio_send_event (io_event_t *ev) {
 static void
 nrf52_radio_end_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->end);
+	call_state (this,this->radio_state->end);
 }
 
 static void
 nrf52_radio_ready_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->ready);
+	call_state (this,this->radio_state->ready);
 }
 
 static void
@@ -368,12 +368,12 @@ nrf52_radio_power_on (nrf52_radio_t *this) {
 static void
 nrf52_radio_open_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
-	call_state (this,this->state->open);
+	call_state (this,this->radio_state->open);
 	io_byte_memory_free (io_get_byte_memory (io_socket_io (this)),ev);
 }
 
 static bool
-nrf52_radio_open (io_socket_t *socket) {
+nrf52_radio_open (io_socket_t *socket,io_socket_open_flag_t flag) {
 	if (
 		io_cpu_clock_is_derrived_from (
 			io_get_core_clock (io_socket_io(socket)),
@@ -522,23 +522,23 @@ EVENT_DATA io_encoding_implementation_t nrf52_radio_encoding_implementation = {
 
 static nrf52_radio_state_t const*
 nrf52_radio_state_ignore_close (nrf52_radio_t *this) {
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
 nrf52_radio_state_ignore_send (nrf52_radio_t *this) {
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
 nrf52_radio_state_ignore_tx_ready (nrf52_radio_t *this) {
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
 nrf52_radio_state_unexpected_event (nrf52_radio_t *this) {
 	io_panic (io_socket_io (this),IO_PANIC_SOMETHING_BAD_HAPPENED);
-	return this->state;
+	return this->radio_state;
 }
 
 static void
@@ -632,7 +632,7 @@ nrf52_radio_power_off_state_enter (nrf52_radio_t *this) {
 	
 	this->registers->POWER = 0;
 
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
@@ -709,7 +709,7 @@ nrf52_radio_receive_ramp_up_state_enter (nrf52_radio_t *this) {
 	this->registers->SHORTS = 0;
 	this->registers->TASKS_RXEN = 1;
 
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
@@ -793,7 +793,7 @@ nrf52_radio_receive_listen_state_enter (nrf52_radio_t *this) {
 	);
 	#endif
 	
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
@@ -832,7 +832,7 @@ nrf52_radio_receive_busy_state_enter (nrf52_radio_t *this) {
 	);
 	#endif
 	
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
@@ -853,6 +853,7 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 
 				if (binding != NULL) {
 					if (io_encoding_pipe_put_encoding (binding->port->receive_pipe,frame)) {
+						io_layer_set_destination_address (layer,frame,io_socket_address (this));
 						if (binding->port->rx_available) {
 							io_enqueue_event (io_socket_io (this),binding->port->rx_available);
 						}
@@ -918,12 +919,12 @@ nrf52_radio_transmit_ramp_up_state_enter (nrf52_radio_t *this) {
 */
 	this->registers->TASKS_TXEN = 1;
 
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
 ready_event_in_transmit_ramp_up (nrf52_radio_t *this) {
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*
@@ -974,7 +975,7 @@ nrf52_radio_transmit_idle_state_enter (nrf52_radio_t *this) {
 			}
 		}
 		
-		return this->state;
+		return this->radio_state;
 	} else {
 		io_multiplex_socket_round_robin_signal_transmit_available (
 			(io_multiplex_socket_t*) this
@@ -1011,7 +1012,7 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_idle = {
 static nrf52_radio_state_t const*
 nrf52_radio_transmit_busy_state_enter (nrf52_radio_t *this) {
 
-	return this->state;
+	return this->radio_state;
 }
 
 static nrf52_radio_state_t const*

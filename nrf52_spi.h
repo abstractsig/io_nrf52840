@@ -99,7 +99,7 @@ nrf52_spi_mtu (io_socket_t const *socket) {
 	return 1024;
 }
 static bool
-nrf52_spi_open (io_socket_t *socket) {
+nrf52_spi_open (io_socket_t *socket,io_socket_open_flag_t flag) {
 	nrf52_spi_t *this = (nrf52_spi_t*) socket;
 
 	if ((this->registers->ENABLE & SPI_ENABLE_ENABLE_Msk) == 0) {

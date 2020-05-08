@@ -76,7 +76,7 @@ nrf52_twi_master_free (io_socket_t *socket) {
 }
 
 static bool
-nrf52_twi_master_open (io_socket_t *socket) {
+nrf52_twi_master_open (io_socket_t *socket,io_socket_open_flag_t flag) {
 	nrf52_twi_master_t *this = (nrf52_twi_master_t*) socket;
 
 	if ((this->registers->ENABLE & TWI_ENABLE_ENABLE_Msk) == 0) {

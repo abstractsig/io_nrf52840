@@ -105,7 +105,7 @@ nrf_uart_start_rx (nrf52_uart_t *this) {
 }
 
 static bool
-nrf52_uart_open (io_socket_t *socket) {
+nrf52_uart_open (io_socket_t *socket,io_socket_open_flag_t flag) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
 
 	if (this->uart_registers->ENABLE == 0) {

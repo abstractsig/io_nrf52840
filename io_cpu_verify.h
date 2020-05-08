@@ -201,7 +201,7 @@ TEST_BEGIN(test_io_radio_packet_encoding_1) {
 			}
 		}
 		
-		io_socket_open (socket[0]);
+		io_socket_open (socket[0],IO_SOCKET_OPEN_CONNECT);
 		VERIFY (io_socket_send_message (socket[0],encoding),NULL);
 		
 		io_wait_for_all_events (TEST_IO);

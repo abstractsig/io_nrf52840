@@ -9,7 +9,7 @@
 TEST_BEGIN(test_nrf_qspi_1) {
 	io_socket_t *qspi = io_get_socket (TEST_IO,QSPI_SOCKET);
 	if (VERIFY (qspi != NULL,NULL)) {
-		if (VERIFY (io_socket_open (qspi),NULL)) {
+		if (VERIFY (io_socket_open (qspi,IO_SOCKET_OPEN_CONNECT),NULL)) {
 			io_socket_close(qspi);
 			VERIFY (io_socket_is_closed(qspi),NULL);
 		}
