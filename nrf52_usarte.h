@@ -196,21 +196,21 @@ nrf_uart_output_next_buffer (nrf52_uart_t *this) {
 }
 
 static bool
-nrf52_uart_send_message_blocking (io_socket_t *socket,io_encoding_t *encoding) {
+nrf52_uart_send_message (io_socket_t *socket,io_encoding_t *encoding) {
+	bool ok = false;
+	
 	if (is_io_binary_encoding (encoding)) {
 		nrf52_uart_t *this = (nrf52_uart_t*) socket;
 		if (io_encoding_pipe_put_encoding (this->tx_pipe,encoding)) {
 			if (io_encoding_pipe_count_occupied_slots (this->tx_pipe) == 1) {
 				nrf_uart_output_next_buffer (this);
 			}
-			return true;
-		} else {
-			unreference_io_encoding (encoding);
-			return false;
+			ok = true;
 		}
-	} else {
-		return false;
 	}
+	
+	unreference_io_encoding (encoding);
+	return ok;
 }
 
 void
@@ -305,6 +305,15 @@ nrf52_uart_mtu (io_socket_t const *socket) {
 	return 1024;
 }
 
+//
+// perform a  blocking flush of all messages
+//
+void
+nrf52_uart_flush (io_socket_t *socket) {
+	nrf52_uart_t *this = (nrf52_uart_t*) socket;
+	while (io_encoding_pipe_count_occupied_slots (this->tx_pipe) > 0);
+}
+
 EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	SPECIALISE_IO_SOCKET_IMPLEMENTATION (
 		&io_physical_socket_implementation
@@ -314,7 +323,8 @@ EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
 	.open = nrf52_uart_open,
 	.close = nrf52_uart_close,
 	.new_message = nrf52_uart_new_message,
-	.send_message = nrf52_uart_send_message_blocking,
+	.send_message = nrf52_uart_send_message,
+	.flush = nrf52_uart_flush,
 	.mtu = nrf52_uart_mtu,
 };
 

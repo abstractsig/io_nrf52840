@@ -288,7 +288,6 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	.bind_to_outer_socket = nrf52_twi_master_bind_to_outer_socket,
 	.new_message = nrf52_twi_master_new_message,
 	.send_message = nrf52_twi_master_send_message,
-	.iterate_outer_sockets = NULL,
 	.mtu = nrf52_twi_master_mtu,
 };
 
