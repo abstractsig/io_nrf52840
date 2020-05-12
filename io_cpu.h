@@ -644,7 +644,7 @@ nrf52_get_prbs_random_u32 (io_t *io) {
 }
 
 static void
-wait_for_all_events (io_t *io) {
+nrf52_wait_for_all_events (io_t *io) {
 	io_event_t *event;
 	io_alarm_t *alarm;
 	do {
@@ -654,7 +654,7 @@ wait_for_all_events (io_t *io) {
 		EXIT_CRITICAL_SECTION(io);
 	} while (
 			event != &s_null_io_event
-		&&	alarm != &s_null_io_alarm
+		||	alarm != &s_null_io_alarm
 	);
 }
 
@@ -771,7 +771,7 @@ add_io_implementation_cpu_methods (io_implementation_t *io_i) {
 	io_i->dequeue_alarm = nrf_time_clock_dequeue_alarm;
 	io_i->register_interrupt_handler = nrf52_register_interrupt_handler;
 	io_i->unregister_interrupt_handler = nrf52_unregister_interrupt_handler;
-	io_i->wait_for_all_events = wait_for_all_events;
+	io_i->wait_for_all_events = nrf52_wait_for_all_events;
 
 	io_i->set_io_pin_output = nrf52_set_io_pin_to_output,
 	io_i->set_io_pin_input = nrf52_set_io_pin_to_input,

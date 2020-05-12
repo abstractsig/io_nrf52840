@@ -119,10 +119,11 @@ radio_emulator_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_radio_emulator = {
-	SPECIALISE_IO_SOCKET_EMULATOR (
-		nrf52_radio_socket_new_message,
-		radio_emulator_send_message
+	SPECIALISE_IO_SOCKET_EMULATOR_IMPLEMENTATION (
+		&io_socket_emulator_implementation
 	)
+	.new_message = nrf52_radio_socket_new_message,
+	.send_message = radio_emulator_send_message,
 };
 
 

@@ -6,6 +6,9 @@
 #ifndef nrf52_radio_H_
 #define nrf52_radio_H_
 
+#define DEBUG_RADIO 1
+
+
 #define NRF_CONNECT_RADIO_MODE					RADIO_MODE_MODE_Nrf_1Mbit
 #define NRF_CONNECT_RADIO_FREQUENCY				2459000000
 #define NRF_BROADCAST_ADDRESS						0x71727374
@@ -68,8 +71,6 @@
 
 #include <sockets/io_dlc_socket.h>
 #include <nrf52_radio_layer.h>
-
-#define DEBUG_RADIO 1
 
 struct nrf52_radio_state;
 typedef struct nrf52_radio_state nrf52_radio_state_t;
@@ -362,7 +363,6 @@ nrf52_radio_power_on (nrf52_radio_t *this) {
 	);
 }
 
-
 static void
 nrf52_radio_open_event (io_event_t *ev) {
 	nrf52_radio_t *this = ev->user_value;
@@ -459,20 +459,17 @@ nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_radio_socket_implementation = {
-	.specialisation_of = &io_multiplex_socket_implementation,
+	SPECIALISE_IO_MULTIPLEX_SOCKET_IMPLEMENTATION (
+		&io_multiplex_socket_implementation
+	)
 	.initialise = nrf52_radio_initialise,
 	.reference = io_virtual_socket_increment_reference,
-	.free = io_virtual_socket_free,
 	.open = nrf52_radio_open,
 	.close = nrf52_radio_close,
 	.is_closed = nrf52_radio_is_closed,
-	.bind_inner = io_multiplex_socket_bind_inner,
 	.bind_to_outer_socket = nrf52_radio_bind_to_outer_socket,
 	.new_message = nrf52_radio_socket_new_message,
 	.send_message = nrf52_radio_send_message,
-	.get_receive_pipe = io_multiplex_socket_get_receive_pipe,
-	.iterate_inner_sockets = NULL,
-	.iterate_outer_sockets = NULL,
 	.mtu = nrf52_radio_mtu,
 };
 
@@ -737,7 +734,7 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_ramp_up = {
 static nrf52_radio_state_t const*
 nrf52_radio_receive_idle_state_enter (nrf52_radio_t *this) {
 
-	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO > 1
 	io_printf (
 		io_socket_io (this),"%-*s%-*sreceive idle\n",
 		DBP_FIELD1,"radio",
@@ -782,7 +779,7 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_idle = {
 static nrf52_radio_state_t const*
 nrf52_radio_receive_listen_state_enter (nrf52_radio_t *this) {
 
-	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO > 1
 	io_printf (
 		io_socket_io (this),"%-*s%-*sreceive listen\n",
 		DBP_FIELD1,"radio",
@@ -830,7 +827,7 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_listen = {
 static nrf52_radio_state_t const*
 nrf52_radio_receive_busy_state_enter (nrf52_radio_t *this) {
 
-	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO > 1
 	io_printf (
 		io_socket_io (this),"%-*s%-*sreceive busy\n",
 		DBP_FIELD1,"radio",
@@ -873,7 +870,7 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 			io_panic (io_socket_io(this),IO_PANIC_OUT_OF_MEMORY);
 		}
 		
-		#if defined(DEBUG_RADIO) && DEBUG_RADIO
+		#if defined(DEBUG_RADIO) && DEBUG_RADIO > 0
 		uint32_t from = read_le_uint32 (this->receieve_buffer + 1);
 		io_printf (
 			io_socket_io (this),"%-*s%-*sreceive %u byte packet (to %u) from %u\n",
@@ -885,7 +882,15 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 		);
 		#endif
 	} else {
-		// record crc error...
+		#if defined(DEBUG_RADIO) && DEBUG_RADIO > 0
+		io_printf (
+			io_socket_io (this),"%-*s%-*sreceive %u byte error packet (to %u)\n",
+			DBP_FIELD1,"radio",
+			DBP_FIELD2,"state",
+			this->receieve_buffer[0],
+			this->registers->RXMATCH
+		);
+		#endif
 	}
 	
 	return &nrf52_radio_receive_idle;
@@ -1029,7 +1034,7 @@ nrf52_radio_transmit_busy_state_end_event (nrf52_radio_t *this) {
 	);
 	this->current_transmit_binding = NULL;
 
-	#if defined(DEBUG_RADIO) && DEBUG_RADIO
+	#if defined(DEBUG_RADIO) && DEBUG_RADIO > 1
 	io_printf (
 		io_socket_io (this),"%-*s%-*stransmit busy end\n",
 		DBP_FIELD1,"radio",

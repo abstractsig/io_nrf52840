@@ -306,17 +306,15 @@ nrf52_uart_mtu (io_socket_t const *socket) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_uart_implementation = {
-	.specialisation_of = &io_physical_socket_implementation,
+	SPECIALISE_IO_SOCKET_IMPLEMENTATION (
+		&io_physical_socket_implementation
+	)
 	.initialise = nrf52_uart_initialise,
 	.free = nrf52_uart_free,
 	.open = nrf52_uart_open,
 	.close = nrf52_uart_close,
-	.bind_to_outer_socket = NULL,
-	.bind_inner = NULL,
 	.new_message = nrf52_uart_new_message,
 	.send_message = nrf52_uart_send_message_blocking,
-	.iterate_inner_sockets = NULL,
-	.iterate_outer_sockets = NULL,
 	.mtu = nrf52_uart_mtu,
 };
 
