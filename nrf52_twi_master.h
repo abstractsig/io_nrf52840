@@ -277,14 +277,17 @@ nrf52_twi_master_bind_to_outer_socket (io_socket_t *socket,io_socket_t *outer) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
-	.specialisation_of = &io_physical_socket_implementation,
+	SPECIALISE_IO_MULTIPLEX_SOCKET_IMPLEMENTATION (
+		&io_multiplex_socket_implementation
+	)
+//	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_twi_master_initialise,
 	.reference = io_virtual_socket_increment_reference,
 	.free = nrf52_twi_master_free,
 	.open = nrf52_twi_master_open,
 	.close = nrf52_twi_master_close,
 	.is_closed = nrf52_twi_master_is_closed,
-	.bind_inner = io_multiplex_socket_bind_inner,
+//	.bind_inner = io_multiplex_socket_bind_inner,
 	.bind_to_outer_socket = nrf52_twi_master_bind_to_outer_socket,
 	.new_message = nrf52_twi_master_new_message,
 	.send_message = nrf52_twi_master_send_message,
