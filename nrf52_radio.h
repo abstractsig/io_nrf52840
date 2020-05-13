@@ -7,6 +7,7 @@
 #define nrf52_radio_H_
 
 #define DEBUG_RADIO 1
+#define NRF52_RADIO_SOCKET_LOG_LEVEL 			IO_INFO_LOG_LEVEL
 
 
 #define NRF_CONNECT_RADIO_MODE					RADIO_MODE_MODE_Nrf_1Mbit
@@ -734,11 +735,13 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_ramp_up = {
 static nrf52_radio_state_t const*
 nrf52_radio_receive_idle_state_enter (nrf52_radio_t *this) {
 
-	#if defined(DEBUG_RADIO) && DEBUG_RADIO > 1
-	io_printf (
-		io_socket_io (this),"%-*s%-*sreceive idle\n",
+	#if defined(NRF52_RADIO_SOCKET_LOG_LEVEL)
+	io_log (
+		io_socket_io (this),
+		IO_DETAIL_LOG_LEVEL,
+		"%-*s%-*senter\n",
 		DBP_FIELD1,"radio",
-		DBP_FIELD2,"state"
+		DBP_FIELD2,"rx idle"
 	);
 	#endif
 
@@ -779,11 +782,13 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_receive_idle = {
 static nrf52_radio_state_t const*
 nrf52_radio_receive_listen_state_enter (nrf52_radio_t *this) {
 
-	#if defined(DEBUG_RADIO) && DEBUG_RADIO > 1
-	io_printf (
-		io_socket_io (this),"%-*s%-*sreceive listen\n",
+	#if defined(NRF52_RADIO_SOCKET_LOG_LEVEL)
+	io_log (
+		io_socket_io (this),
+		IO_DETAIL_LOG_LEVEL,
+		"%-*s%-*senter\n",
 		DBP_FIELD1,"radio",
-		DBP_FIELD2,"state"
+		DBP_FIELD2,"receive listen"
 	);
 	#endif
 	
@@ -882,11 +887,13 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 		);
 		#endif
 	} else {
-		#if defined(DEBUG_RADIO) && DEBUG_RADIO > 0
-		io_printf (
-			io_socket_io (this),"%-*s%-*sreceive %u byte error packet (to %u)\n",
+		#if defined(NRF52_RADIO_SOCKET_LOG_LEVEL)
+		io_log (
+			io_socket_io (this),
+			NRF52_RADIO_SOCKET_LOG_LEVEL,
+			"%-*s%-*sreceive %u byte error packet (to %u)\n",
 			DBP_FIELD1,"radio",
-			DBP_FIELD2,"state",
+			DBP_FIELD2,"rx busy",
 			this->receieve_buffer[0],
 			this->registers->RXMATCH
 		);

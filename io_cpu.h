@@ -660,7 +660,12 @@ nrf52_wait_for_all_events (io_t *io) {
 
 static void
 nrf52_log (io_t *io,char const *fmt,va_list va) {
-
+	io_socket_t *print = io_get_socket (io,IO_PRINTF_SOCKET);
+	if (print) {
+		io_encoding_t *msg = io_socket_new_message (print);
+		io_encoding_print (msg,fmt,va);
+		io_socket_send_message (print,msg);
+	}
 }
 
 static bool
@@ -746,6 +751,41 @@ nrf52840_is_first_run (io_t *io) {
 	nrf52840_io_t *this = (nrf52840_io_t*) io;
 	return this->first_run;
 }
+
+#define SPECIALISE_CPU_IO_IMPLEMENTATION(S) \
+	SPECIALISE_IO_IMPLEMENTATION(S) \
+	.is_first_run = nrf52840_is_first_run, \
+	.uid = nrf52840_io_config_uid, \
+	.get_byte_memory = nrf52_io_get_byte_memory, \
+	.get_short_term_value_memory = nrf52_io_get_stvm, \
+	.do_gc = nrf52_do_gc, \
+	.get_random_u32 = nrf52_get_random_u32, \
+	.get_next_prbs_u32 = nrf52_get_prbs_random_u32, \
+	.signal_task_pending = nrf52_signal_task_pending, \
+	.enqueue_task = nrf52_enqueue_task, \
+	.do_next_task = nrf52_do_next_task, \
+	.signal_event_pending = nrf52_signal_event_pending, \
+	.enter_critical_section = nrf52_enter_critical_section, \
+	.exit_critical_section = nrf52_exit_critical_section, \
+	.in_event_thread = nrf52_is_in_event_thread, \
+	.wait_for_event = nrf52_wait_for_event, \
+	.get_time = nrf52_get_time, \
+	.enqueue_alarm = nrf_time_clock_enqueue_alarm, \
+	.dequeue_alarm = nrf_time_clock_dequeue_alarm, \
+	.register_interrupt_handler = nrf52_register_interrupt_handler, \
+	.unregister_interrupt_handler = nrf52_unregister_interrupt_handler, \
+	.wait_for_all_events = nrf52_wait_for_all_events, \
+	.set_io_pin_output = nrf52_set_io_pin_to_output, \
+	.set_io_pin_input = nrf52_set_io_pin_to_input, \
+	.set_io_pin_interrupt = nrf52_set_io_pin_interrupt, \
+	.set_io_pin_alternate = io_pin_nop, \
+	.read_from_io_pin = nrf52_read_io_input_pin, \
+	.write_to_io_pin = nrf52_write_to_io_pin, \
+	.toggle_io_pin = nrf52_toggle_io_pin, \
+	.valid_pin = nrf52_io_pin_is_valid, \
+	.log = nrf52_log, \
+	.panic = nrf52_panic, \
+	/**/
 
 void
 add_io_implementation_cpu_methods (io_implementation_t *io_i) {
