@@ -4,7 +4,9 @@
  */
 #ifndef WITH_QSPI_VERIFY
 #define WITH_QSPI_VERIFY
+#ifdef IMPLEMENT_VERIFY_IO_CPU_QSPI
 #include <io_verify.h>
+#include <io_device.h>
 
 TEST_BEGIN(test_nrf_qspi_1) {
 	io_socket_t *qspi = io_get_socket (TEST_IO,QSPI_SOCKET);
@@ -16,7 +18,6 @@ TEST_BEGIN(test_nrf_qspi_1) {
 	}
 }
 TEST_END
-
 
 UNIT_SETUP(setup_nrf_qspi_unit_test) {
 	if (
@@ -45,8 +46,16 @@ nrf_qspi_unit_test (V_unit_test_t *unit) {
 	unit->teardown = teardown_nrf_qspi_unit_test;
 }
 
-#define IO_QSPI_UNIT_TEST nrf_qspi_unit_test,
+void
+run_ut_io_cpu_qspi (V_runner_t *runner) {
+	static const unit_test_t test_set[] = {
+		nrf_qspi_unit_test,
+		0
+	};
+	V_run_unit_tests(runner,test_set);
+}
 
+#endif /* IMPLEMENT_VERIFY_IO_CPU_QSPI */
 #endif
 /*
 ------------------------------------------------------------------------------

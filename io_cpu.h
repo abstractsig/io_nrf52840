@@ -787,47 +787,6 @@ nrf52840_is_first_run (io_t *io) {
 	return this->first_run;
 }
 
-/*
-void
-add_io_implementation_cpu_methods (io_implementation_t *io_i) {
-	add_io_implementation_core_methods (io_i);
-
-	io_i->is_first_run = nrf52840_is_first_run;
-	io_i->uid = nrf52840_io_config_uid;
-	io_i->get_byte_memory = nrf52_io_get_byte_memory;
-	io_i->get_short_term_value_memory = nrf52_io_get_stvm;
-	io_i->do_gc = nrf52_do_gc;
-	io_i->get_random_u32 = nrf52_get_random_u32;
-	io_i->get_next_prbs_u32 = nrf52_get_prbs_random_u32;
-	io_i->signal_task_pending = nrf52_signal_task_pending;
-	io_i->enqueue_task = nrf52_enqueue_task;
-	io_i->do_next_task = nrf52_do_next_task;
-	io_i->signal_event_pending = nrf52_signal_event_pending;
-	io_i->enter_critical_section = nrf52_enter_critical_section;
-	io_i->exit_critical_section = nrf52_exit_critical_section;
-	io_i->in_event_thread = nrf52_is_in_event_thread;
-	io_i->wait_for_event = nrf52_wait_for_event;
-	io_i->get_time = nrf52_get_time,
-	io_i->enqueue_alarm = nrf_time_clock_enqueue_alarm;
-	io_i->dequeue_alarm = nrf_time_clock_dequeue_alarm;
-	io_i->register_interrupt_handler = nrf52_register_interrupt_handler;
-	io_i->unregister_interrupt_handler = nrf52_unregister_interrupt_handler;
-	io_i->wait_for_all_events = nrf52_wait_for_all_events;
-
-	io_i->set_io_pin_output = nrf52_set_io_pin_to_output,
-	io_i->set_io_pin_input = nrf52_set_io_pin_to_input,
-	io_i->set_io_pin_interrupt = nrf52_set_io_pin_interrupt,
-	io_i->set_io_pin_alternate = io_pin_nop,
-	io_i->read_from_io_pin = nrf52_read_io_input_pin,
-	io_i->write_to_io_pin = nrf52_write_to_io_pin,
-	io_i->toggle_io_pin = nrf52_toggle_io_pin,
-	io_i->valid_pin = nrf52_io_pin_is_valid,
-
-	io_i->log = nrf52_log;
-	io_i->panic = nrf52_panic;
-}
-*/
-
 static void
 event_thread (void *io) {
 	nrf52840_io_t *this = io;
