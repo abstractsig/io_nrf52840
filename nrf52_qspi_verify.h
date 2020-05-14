@@ -4,7 +4,7 @@
  */
 #ifndef WITH_QSPI_VERIFY
 #define WITH_QSPI_VERIFY
-#include <verify_io.h>
+#include <io_verify.h>
 
 TEST_BEGIN(test_nrf_qspi_1) {
 	io_socket_t *qspi = io_get_socket (TEST_IO,QSPI_SOCKET);
