@@ -222,7 +222,7 @@ UNIT_SETUP(setup_io_cpu_unit_test) {
 UNIT_TEARDOWN(teardown_io_cpu_unit_test) {
 }
 
-void
+static void
 io_cpu_unit_test (V_unit_test_t *unit) {
 	static V_test_t const tests[] = {
 		test_io_events_1,
@@ -238,10 +238,16 @@ io_cpu_unit_test (V_unit_test_t *unit) {
 	unit->setup = setup_io_cpu_unit_test;
 	unit->teardown = teardown_io_cpu_unit_test;
 }
-#define IO_CPU_UNIT_TESTS \
-	io_cpu_unit_test,\
-	/**/
-#else
-#define IO_CPU_UNIT_TESTS
+
+
+void
+run_ut_io_cpu (V_runner_t *runner) {
+	static const unit_test_t test_set[] = {
+		io_cpu_unit_test,
+		0
+	};
+	V_run_unit_tests(runner,test_set);
+}
+
 #endif /* IMPLEMENT_VERIFY_IO_CPU */
 #endif

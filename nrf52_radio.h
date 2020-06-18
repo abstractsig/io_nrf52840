@@ -878,12 +878,12 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 		#if defined(DEBUG_RADIO) && DEBUG_RADIO > 0
 		uint32_t from = read_le_uint32 (this->receieve_buffer + 1);
 		io_printf (
-			io_socket_io (this),"%-*s%-*sreceive %u byte packet (to %u) from %u\n",
+			io_socket_io (this),"%-*s%-*sreceive %u byte packet (to %u) from :%04x\n",
 			DBP_FIELD1,"radio",
 			DBP_FIELD2,"state",
 			this->receieve_buffer[0],
 			this->registers->RXMATCH,
-			from
+			(from & 0xffff)
 		);
 		#endif
 	} else {
