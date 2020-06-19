@@ -495,24 +495,10 @@ nrf52_radio_encoding_limit (void) {
 }
 
 EVENT_DATA io_encoding_implementation_t nrf52_radio_encoding_implementation = {
-	.specialisation_of = &io_packet_encoding_implementation,
+	SPECIALISE_IO_PACKET_ENCODING_IMPLEMENTATION (
+		&io_packet_encoding_implementation
+	)
 	.make_encoding = nrf52_radio_encoding_new,
-	.free = io_packet_encoding_free,
-	.get_io = io_binary_encoding_get_io,
-	.grow = io_binary_encoding_grow,
-	.grow_increment = default_io_encoding_grow_increment,
-	.fill = io_binary_encoding_fill_bytes,
-	.decode_to_io_value = io_binary_encoding_decode_to_io_value,
-	.increment_decode_offest = io_packet_encoding_increment_decode_offest,
-	.append_byte = io_binary_encoding_append_byte,
-	.append_bytes = io_binary_encoding_append_bytes,
-	.pop_last_byte = io_binary_encoding_pop_last_byte,
-	.print = io_binary_encoding_print,
-	.reset = io_binary_encoding_reset,
-	.layer = &io_packet_layer_api,
-	.get_byte_stream = io_binary_encoding_get_byte_stream,
-	.get_content = io_binary_encoding_get_content,
-	.length = io_binary_encoding_length,
 	.limit = nrf52_radio_encoding_limit,
 };
 

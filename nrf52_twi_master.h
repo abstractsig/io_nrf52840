@@ -40,7 +40,7 @@ extern EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation;
 #ifdef IMPLEMENT_IO_CPU
 //-----------------------------------------------------------------------------
 //
-// Implementtaion
+// Implementation
 //
 //-----------------------------------------------------------------------------
 
@@ -244,7 +244,9 @@ nrf52_twi_master_transfer_complete (io_event_t *ev) {
 	}
 
 	if (!nrf_twi_output_next_buffer (this)) {
-		io_multiplex_socket_round_robin_signal_transmit_available ((io_multiplex_socket_t*) this);
+		io_multiplex_socket_round_robin_signal_transmit_available (
+			(io_multiplex_socket_t*) this
+		);
 	}
 }
 
@@ -280,14 +282,12 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	SPECIALISE_IO_MULTIPLEX_SOCKET_IMPLEMENTATION (
 		&io_multiplex_socket_implementation
 	)
-//	.specialisation_of = &io_physical_socket_implementation,
 	.initialise = nrf52_twi_master_initialise,
 	.reference = io_virtual_socket_increment_reference,
 	.free = nrf52_twi_master_free,
 	.open = nrf52_twi_master_open,
 	.close = nrf52_twi_master_close,
 	.is_closed = nrf52_twi_master_is_closed,
-//	.bind_inner = io_multiplex_socket_bind_inner,
 	.bind_to_outer_socket = nrf52_twi_master_bind_to_outer_socket,
 	.new_message = nrf52_twi_master_new_message,
 	.send_message = nrf52_twi_master_send_message,
@@ -312,20 +312,6 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation = {
 		&io_adapter_socket_implementation
 	)
 	.new_message = nrf52_twi_slave_new_message,
-/*
-	.specialisation_of = &io_adapter_socket_implementation,
-	.initialise = io_adapter_socket_initialise,
-	.reference = io_counted_socket_increment_reference,
-	.free = io_adapter_socket_free,
-	.open = io_adapter_socket_open,
-	.close = io_adapter_socket_close,
-	.is_closed = io_adapter_socket_is_closed,
-	.bind_to_outer_socket = io_adapter_socket_bind_to_outer,
-	.bind_inner = io_adapter_socket_bind,
-	.new_message = nrf52_twi_slave_new_message,
-	.send_message = io_adapter_socket_send_message,
-	.mtu = io_adapter_socket_mtu,
-*/
 };
 
 #endif /* IMPLEMENT_IO_CPU */
