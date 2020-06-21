@@ -13,14 +13,11 @@
 #include <layers/io_twi_layer.h>
 
 typedef struct PACK_STRUCTURE nrf52_twi_bus_master {
-	IO_MULTIPLEX_SOCKET_STRUCT_MEMBERS
-
-	io_encoding_implementation_t const *encoding;
+	IO_TWI_MASTER_SOCKET_STRUCT_MEMBERS
 
 	io_twi_transfer_t current_transfer;
 	io_event_t transfer_complete;
 	
-	io_encoding_pipe_t *tx_pipe;
 	const uint8_t *next_byte,*end;
 	io_encoding_pipe_t *rx_pipe;
 	
@@ -34,7 +31,7 @@ typedef struct PACK_STRUCTURE nrf52_twi_bus_master {
 } nrf52_twi_master_t;
 
 extern EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation;
-extern EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation;
+extern EVENT_DATA io_socket_implementation_t io_twi_slave_adapter_implementation;
 
 
 #ifdef IMPLEMENT_IO_CPU
@@ -51,10 +48,8 @@ static io_socket_t*
 nrf52_twi_master_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_twi_master_t *this = (nrf52_twi_master_t*) socket;
 
-	initialise_io_multiplex_socket (socket,io,C);
-	
-	this->encoding = C->encoding;
-	
+	io_twi_master_socket_initialise (socket,io,C);
+		
 	register_io_interrupt_handler (
 		io,this->interrupt_number,nrf52_twi_master_interrupt,this
 	);
@@ -62,17 +57,13 @@ nrf52_twi_master_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C
 	initialise_io_event (
 		&this->transfer_complete,nrf52_twi_master_transfer_complete,this
 	);
-
-	this->tx_pipe = mk_io_encoding_pipe (
-		io_get_byte_memory(io),io_settings_transmit_pipe_length(C)
-	);
 	
 	return socket;
 }
 
 static void
 nrf52_twi_master_free (io_socket_t *socket) {
-	// no action required, uarts are static
+	// panic
 }
 
 static bool
@@ -187,7 +178,7 @@ nrf52_twi_master_interrupt (void *user_value) {
 		io_enqueue_event (io_socket_io(this),&this->transfer_complete);
 	}
 }
-
+/*
 static io_encoding_t*
 nrf52_twi_master_new_message (io_socket_t *socket) {
 	nrf52_twi_master_t *this = (nrf52_twi_master_t*) socket;
@@ -206,7 +197,7 @@ nrf52_twi_master_new_message (io_socket_t *socket) {
 
 	return reference_io_encoding (message);
 }
-
+*/
 static bool
 nrf_twi_output_next_buffer (nrf52_twi_master_t *this) {
 	io_encoding_t *next;
@@ -252,20 +243,20 @@ nrf52_twi_master_transfer_complete (io_event_t *ev) {
 
 static bool
 nrf52_twi_master_send_message (io_socket_t *socket,io_encoding_t *encoding) {
+	bool ok = false;
+	
 	if (is_io_twi_encoding (encoding)) {
 		nrf52_twi_master_t *this = (nrf52_twi_master_t*) socket;
 		if (io_encoding_pipe_put_encoding (this->tx_pipe,encoding)) {
 			if (io_encoding_pipe_count_occupied_slots (this->tx_pipe) == 1) {
 				nrf_twi_output_next_buffer (this);
 			}
-			return true;
-		} else {
-			unreference_io_encoding (encoding);
-			return false;
+			ok = true;
 		}
-	} else {
-		return false;
 	}
+	
+	unreference_io_encoding (encoding);
+	return ok;
 }
 
 static size_t
@@ -279,7 +270,7 @@ nrf52_twi_master_bind_to_outer_socket (io_socket_t *socket,io_socket_t *outer) {
 }
 
 EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
-	SPECIALISE_IO_MULTIPLEX_SOCKET_IMPLEMENTATION (
+	SPECIALISE_IO_TWI_MASTER_SOCKET_IMPLEMENTATION (
 		&io_multiplex_socket_implementation
 	)
 	.initialise = nrf52_twi_master_initialise,
@@ -289,29 +280,8 @@ EVENT_DATA io_socket_implementation_t nrf52_twi_master_implementation = {
 	.close = nrf52_twi_master_close,
 	.is_closed = nrf52_twi_master_is_closed,
 	.bind_to_outer_socket = nrf52_twi_master_bind_to_outer_socket,
-	.new_message = nrf52_twi_master_new_message,
 	.send_message = nrf52_twi_master_send_message,
 	.mtu = nrf52_twi_master_mtu,
-};
-
-static io_encoding_t*
-nrf52_twi_slave_new_message (io_socket_t *socket) {
-	io_adapter_socket_t *this = (io_adapter_socket_t*) socket;
-	io_encoding_t *message = io_socket_new_message (this->outer_socket);
-
-	io_twi_transfer_t *cmd = get_twi_layer (message);
-	if (cmd) {
-		io_twi_transfer_bus_address (cmd) = io_u8_address_value (this->address);
-	}
-
-	return message;
-}
-
-EVENT_DATA io_socket_implementation_t nrf52_twi_slave_implementation = {
-	SPECIALISE_IO_ADAPTER_SOCKET_IMPLEMENTATION (
-		&io_adapter_socket_implementation
-	)
-	.new_message = nrf52_twi_slave_new_message,
 };
 
 #endif /* IMPLEMENT_IO_CPU */
