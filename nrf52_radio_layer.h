@@ -160,7 +160,7 @@ nrf52_radio_layer_any_address (void) {
 	return def_io_u32_address(NRF_BROADCAST_ADDRESS);
 }
 
-static io_inner_port_binding_t*
+static io_inner_binding_t*
 nrf52_radio_layer_select_inner_binding (
 	io_layer_t *layer,io_encoding_t *encoding,io_socket_t* socket
 ) {
@@ -169,7 +169,7 @@ nrf52_radio_layer_select_inner_binding (
 	if (packet->length >= 8) {
 		io_address_t addr = io_layer_get_destination_address (layer,encoding);
 		io_multiplex_socket_t* mux = (io_multiplex_socket_t*) socket;
-		io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_port_binding (mux,addr);
+		io_inner_binding_t *inner = io_multiplex_socket_find_inner_binding (mux,addr);
 
 		if (inner) {
 			return inner;

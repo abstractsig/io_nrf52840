@@ -98,7 +98,7 @@ struct PACK_STRUCTURE nrf52_radio {
 		
 	nrf52_radio_state_t const *radio_state;
 	
-	io_inner_port_binding_t *current_transmit_binding;
+	io_inner_binding_t *current_transmit_binding;
 	
 	uint8_t receieve_buffer[NRF_RADIO_MAXIMUM_PAYLOAD_LENGTH + 1];
 	io_time_t last_receive_time;
@@ -439,7 +439,7 @@ nrf52_radio_send_message (io_socket_t *socket,io_encoding_t *encoding) {
 			io_layer_t *inner_layer = io_encoding_get_inner_layer (encoding,base);
 			io_layer_load_header (base,encoding);
 			if (inner_layer) {
-				io_inner_port_binding_t *inner = io_multiplex_socket_find_inner_port_binding (
+				io_inner_binding_t *inner = io_multiplex_socket_find_inner_binding (
 					(io_multiplex_socket_t *) socket,
 					io_layer_get_source_address (inner_layer,encoding)
 				);
@@ -732,7 +732,7 @@ nrf52_radio_receive_idle_state_enter (nrf52_radio_t *this) {
 	#endif
 
 	// do we have any packets to send?
-	io_inner_port_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
+	io_inner_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
 		(io_multiplex_socket_t*) this
 	);
 	
@@ -841,7 +841,7 @@ nrf52_radio_receive_busy_state_end_event (nrf52_radio_t *this) {
 			io_layer_t *layer = push_nrf52_radio_receive_layer (frame);
 			if (layer != NULL) {
 				io_address_t inner = io_layer_get_inner_address(layer,frame);
-				io_inner_port_binding_t *binding = io_multiplex_socket_find_inner_port_binding (
+				io_inner_binding_t *binding = io_multiplex_socket_find_inner_binding (
 					(io_multiplex_socket_t*) this,inner
 				);
 
@@ -959,7 +959,7 @@ static EVENT_DATA nrf52_radio_state_t nrf52_radio_transmit_ramp_up = {
 static nrf52_radio_state_t const*
 nrf52_radio_transmit_idle_state_enter (nrf52_radio_t *this) {
 
-	io_inner_port_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
+	io_inner_binding_t *next = io_multiplex_socket_get_next_transmit_binding (
 		(io_multiplex_socket_t*) this
 	);
 	
