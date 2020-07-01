@@ -216,12 +216,12 @@ get_nrf52_radio_layer (io_encoding_t *encoding) {
 
 io_layer_t*
 push_nrf52_radio_receive_layer (io_encoding_t *encoding) {
-	return io_encoding_push_layer_2 (encoding,mk_nrf52_radio_receive_layer);
+	return io_encoding_push_layer (encoding,mk_nrf52_radio_receive_layer);
 }
 
 io_layer_t*
 push_nrf52_radio_transmit_layer (io_encoding_t *encoding) {
-	return io_encoding_push_layer_2 (encoding,mk_nrf52_radio_transmit_layer);
+	return io_encoding_push_layer (encoding,mk_nrf52_radio_transmit_layer);
 }
 
 
