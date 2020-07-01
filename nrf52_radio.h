@@ -70,7 +70,7 @@
 #define RADIO_STATE_TRANSMITTING				RADIO_STATE_STATE_Tx
 #define RADIO_STATE_TRANSMITTING_DISABLE	RADIO_STATE_STATE_TxDisable
 
-#include <sockets/io_dlc_socket.h>
+#include <xnet/io_dlc_socket.h>
 #include <nrf52_radio_layer.h>
 
 struct nrf52_radio_state;
