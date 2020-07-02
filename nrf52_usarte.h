@@ -43,6 +43,7 @@ extern EVENT_DATA io_socket_implementation_t nrf52_uart_implementation;
 // mplementtaion
 //
 //-----------------------------------------------------------------------------
+
 static void	nrf52_uart_interrupt (void*);
 static void	nrf52_uart_tx_complete (io_event_t*);
 
@@ -51,7 +52,8 @@ static void	nrf52_uart_tx_complete (io_event_t*);
 static io_socket_t*
 nrf52_uart_initialise (io_socket_t *socket,io_t *io,io_settings_t const *C) {
 	nrf52_uart_t *this = (nrf52_uart_t*) socket;
-	this->io = io;
+
+	initialise_io_socket (socket,io);
 	
 	this->tx_pipe = mk_io_encoding_pipe (
 		io_get_byte_memory(io),io_settings_transmit_pipe_length(C)
