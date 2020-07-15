@@ -9,13 +9,19 @@
 #include <nrf/nrf52840.h>
 #include <nrf/nrf52840_bitfields.h>
 
+bool nrf52840_is_first_run (io_t*);
+bool nrf52840_clear_first_run (io_t*);
+void nrf52_stack_usage_info (io_t*,memory_info_t*);
+
 #define SPECIALISE_IO_CPU_IMPLEMENTATION(S) \
 	SPECIALISE_IO_IMPLEMENTATION(S) \
 	.is_first_run = nrf52840_is_first_run, \
+	.clear_first_run = nrf52840_clear_first_run, \
 	.uid = nrf52840_io_config_uid, \
 	.get_byte_memory = nrf52_io_get_byte_memory, \
 	.get_short_term_value_memory = nrf52_io_get_stvm, \
 	.do_gc = nrf52_do_gc, \
+	.get_stack_usage_info = nrf52_stack_usage_info,\
 	.get_random_u32 = nrf52_get_random_u32, \
 	.get_next_prbs_u32 = nrf52_get_prbs_random_u32, \
 	.signal_task_pending = nrf52_signal_task_pending, \
@@ -66,7 +72,6 @@ void	start_nrf_time_clock (io_t*,nrf_64bit_time_clock_t*);
 	io_value_pipe_t *tasks;\
 	nrf_64bit_time_clock_t tc;\
 	uint32_t prbs_state[4]; \
-	uint32_t first_run;\
 	/**/
 
 typedef struct PACK_STRUCTURE nrf52840_io {
@@ -228,8 +233,8 @@ io_generate_uid (io_t *io,io_uid_t *u) {
 	u->words[3] = io_get_random_u32 (io);
 }
 
-static bool
-nrf52840_io_config_clear_first_run (io_t *io) {
+bool
+nrf52840_clear_first_run (io_t *io) {
 	if (ioc.first_run_flag == IO_FIRST_RUN_SET) {
 		io_persistant_state_t new_ioc = ioc;
 		new_ioc.first_run_flag = IO_FIRST_RUN_CLEAR;
@@ -244,17 +249,16 @@ nrf52840_io_config_clear_first_run (io_t *io) {
 		io_write_nvm_page (
 			io_config_u32_ptr(new_ioc),io_config_u32_size(),(uint32_t*) &ioc
 		);
-		return true;
+		
+		return memcmp (&new_ioc,&ioc,sizeof(io_persistant_state_t)) == 0;
 	} else {
 		return false;
 	}
 }
 
-static bool
-nrf52840_io_config_is_first_run (io_t *io) {
-	bool first = (ioc.first_run_flag == IO_FIRST_RUN_SET);
-	nrf52840_io_config_clear_first_run (io);
-	return first;
+bool
+nrf52840_is_first_run (io_t *io) {
+	return (ioc.first_run_flag == IO_FIRST_RUN_SET);
 }
 
 static io_uid_t const*
@@ -578,6 +582,27 @@ nrf52_configure_reset_pin (nrf_io_pin_t reset_pin) {
 //
 // Io
 //
+#define STACK_MARKER_VALUE	0xdeadc0de
+void
+nrf52_stack_usage_info (io_t *io,memory_info_t *info) {
+   extern uint32_t ld_end_of_static_ram_allocations;
+   extern uint32_t ld_top_of_c_stack;
+   uint32_t* cursor = &ld_end_of_static_ram_allocations;
+   uint32_t* end = &ld_top_of_c_stack;
+   uint32_t count = 0;
+
+   info->total_bytes = (end - cursor) * 4;
+
+   while (cursor < end) {
+   	if (*cursor != STACK_MARKER_VALUE) break;
+   	count++;
+   	cursor++;
+   }
+
+   info->free_bytes = count * 4;
+   info->used_bytes = info->total_bytes - info->free_bytes;
+}
+
 static io_byte_memory_t*
 nrf52_io_get_byte_memory (io_t *io) {
 	nrf52840_io_t *this = (nrf52840_io_t*) io;
@@ -781,12 +806,6 @@ nrf52_get_time (io_t *io) {
 	return nrf_64bit_time_clock_get_time (&this->tc);
 }
 
-static bool
-nrf52840_is_first_run (io_t *io) {
-	nrf52840_io_t *this = (nrf52840_io_t*) io;
-	return this->first_run;
-}
-
 static void
 event_thread (void *io) {
 	nrf52840_io_t *this = io;
@@ -799,7 +818,6 @@ void
 initialise_cpu_io (io_t *io) {
 	nrf52840_io_t *this = (nrf52840_io_t*) io;
 	this->in_event_thread = false;
-	this->first_run = nrf52840_io_config_is_first_run(io);
 	register_io_interrupt_handler (
 		io,EVENT_THREAD_INTERRUPT,event_thread,io
 	);
@@ -852,7 +870,7 @@ initialise_c_runtime (void) {
 	uint32_t *end = (uint32_t*) __get_MSP();
 	dest = &ld_end_of_static_ram_allocations;
 	while (dest < end) {
-		*dest++ = 0xdeadc0de;
+		*dest++ = STACK_MARKER_VALUE;
 	}
 	
 	initialise_ram_interrupt_vectors ();
